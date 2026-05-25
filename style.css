@@ -1643,6 +1643,28 @@ input, textarea, select {
     color: var(--danger);
 }
 
+body:not([data-theme="dark"]) .message-actions-new {
+    background: #ffffff;
+    border: 1px solid var(--gray-200);
+}
+
+body:not([data-theme="dark"]) .message-actions-new .msg-btn-new {
+    color: var(--gray-700);
+    background: var(--gray-50);
+}
+
+body:not([data-theme="dark"]) .message-actions-new .msg-btn-new.edit-btn {
+    color: var(--primary-600);
+}
+
+body:not([data-theme="dark"]) .message-actions-new .msg-btn-new.delete-btn {
+    color: var(--danger);
+}
+
+body:not([data-theme="dark"]) .message-actions-new .msg-btn-new:hover {
+    transform: translateY(-1px);
+}
+
 /* زر تسجيل الخروج المحسّن في القائمة الجانبية */
 .logout-new {
     font-weight: 600;
