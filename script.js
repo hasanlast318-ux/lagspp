@@ -5,6 +5,7 @@ import { getFirestore, collection, query, onSnapshot, doc, updateDoc, addDoc, or
 const db = window.db;
 const auth = window.auth;
 const COLLECTION_NAME = "reports";
+const GAS_URL = "https://script.google.com/macros/s/AKfycbzPymoY-eLQdGfkxvX_BeDYRma4gBM8murSh3cEsT_z9CDOkBHXuxdz_8xALzAxzA3FtA/exec";
 
 // متغيرات عامة
 let allUsers = [];
@@ -125,6 +126,27 @@ function resetLoginForm() {
 }
 
 // ========== دوال مساعدة ==========
+async function notifyUser(reportId, messageText) {
+    if (!GAS_URL || GAS_URL === "ضع_هنا_رابط_السكريبت_الخاص_بك") {
+        console.warn("لم يتم تعيين رابط سكريبت جوجل للإشعارات بعد");
+        return;
+    }
+
+    try {
+        await fetch(GAS_URL, {
+            method: "POST",
+            body: JSON.stringify({
+                action: "web_notification",
+                reportId: reportId,
+                messageText: messageText
+            })
+        });
+        console.log("تم إرسال طلب الإشعار للسكريبت");
+    } catch (error) {
+        console.error("فشل إرسال طلب الإشعار:", error);
+    }
+}
+
 function updateStatusDropdownClass(val) {
     const status = (typeof val === 'string') ? val : (val ? val.value : '');
     
@@ -629,6 +651,7 @@ async function sendReply() {
     try {
         const userRef = doc(db, COLLECTION_NAME, selectedUserId);
         await updateDoc(userRef, { messages: updatedMessages });
+        notifyUser(user.reportId || selectedUserId, text);
         
         currentMessages = updatedMessages;
         renderMessages(updatedMessages);
