@@ -542,6 +542,70 @@ function getFreshTimestamp(user = {}, keys = []) {
     return Math.max(...keys.map(key => toMillis(user[key])), 0);
 }
 
+function firstTextValue(...values) {
+    for (const value of values) {
+        if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    return '';
+}
+
+function getUserLocationText(user = {}) {
+    const presence = user.presence || user.userPresence || user.statusInfo || {};
+    const page = firstTextValue(user.currentPage, user.activePage, user.screen, user.route, user.currentRoute);
+    const location = firstTextValue(
+        user.userLocation,
+        user.user_location,
+        user.locationName,
+        user.location_name,
+        user.pageTitle,
+        user.page_title,
+        user.currentPageName,
+        user.current_page_name,
+        user.activePageName,
+        user.screenName,
+        user.screen_name,
+        user.routeName,
+        user.route_name,
+        presence.userLocation,
+        presence.user_location,
+        presence.locationName,
+        presence.pageTitle,
+        presence.currentPageName
+    );
+    const detail = firstTextValue(
+        user.userSubLocation,
+        user.user_sub_location,
+        user.subLocation,
+        user.sub_location,
+        user.innerLocation,
+        user.inner_location,
+        user.sectionName,
+        user.section_name,
+        user.tabName,
+        user.tab_name,
+        user.subPageName,
+        user.sub_page_name,
+        user.currentSectionName,
+        user.current_section_name,
+        user.currentTabName,
+        user.current_tab_name,
+        presence.userSubLocation,
+        presence.subLocation,
+        presence.innerLocation,
+        presence.sectionName,
+        presence.tabName,
+        presence.subPageName,
+        presence.currentSectionName,
+        presence.currentTabName
+    );
+
+    if (location && detail && location !== detail) return `${location} - ${detail}`;
+    if (location) return location;
+    if (detail) return detail;
+    if (page && !['app', 'report', 'offline'].includes(page.toLowerCase())) return page;
+    return '';
+}
+
 function getPresenceState(user = {}) {
     const now = Date.now();
     const lastActiveAt = getFreshTimestamp(user, [
@@ -568,6 +632,7 @@ function getPresenceState(user = {}) {
     const explicitOutOfChat = user.userInChat === false || user.inChat === false || user.user_in_chat === false || user.in_chat === false;
     const explicitInChat = user.userInChat === true || user.inChat === true || user.user_in_chat === true || user.in_chat === true || page.includes('report') || page.includes('بلاغ') || page.includes('problem');
     const explicitOnline = user.userOnline === true || user.online === true || user.active === true || user.isOnline === true || user.user_online === true || user.is_online === true || user.isActive === true;
+    const locationText = getUserLocationText(user);
 
     if (explicitOffline) {
         return {
@@ -588,7 +653,7 @@ function getPresenceState(user = {}) {
     if (isFreshOnline || explicitOnline) {
         return {
             className: 'active-app',
-            text: 'متاح في التطبيق',
+            text: locationText ? `متاح في التطبيق - ${locationText}` : 'متاح في التطبيق',
             color: 'var(--info)'
         };
     }
@@ -1007,11 +1072,12 @@ function renderUsersList() {
     conversationsList.innerHTML = filteredUsers.map(user => {
         const displayName = user.userName || user.userEmail || user.userId || 'مستخدم مجهول';
         const isActive = selectedUserId === user.id;
+        const presence = getPresenceState(user);
         return `
             <div class="conversation-item-new ${isActive ? 'active' : ''}" data-user-id="${user.id}">
                 <div class="conversation-avatar-new">
                     ${displayName.charAt(0).toUpperCase()}
-                    <span class="avatar-status-dot ${getPresenceState(user).className}"></span>
+                    <span class="avatar-status-dot ${presence.className}" title="${escapeHtml(presence.text)}"></span>
                 </div>
                 <div class="conversation-content-new">
                     <div class="conversation-name-new">${escapeHtml(displayName)}</div>
