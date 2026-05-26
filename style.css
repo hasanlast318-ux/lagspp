@@ -2388,6 +2388,11 @@ body:not([data-theme="dark"]) .message-actions-new .msg-btn-new:hover {
     margin-bottom: 14px;
 }
 
+.selected-user-title-new {
+    min-width: 0;
+    flex: 1;
+}
+
 .selected-user-head-new h3 {
     color: var(--gray-900);
     font-size: 16px;
@@ -2396,6 +2401,24 @@ body:not([data-theme="dark"]) .message-actions-new .msg-btn-new:hover {
 .selected-user-head-new p {
     color: var(--gray-500);
     font-size: 12px;
+}
+
+.edit-user-name-btn-new {
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius);
+    background: white;
+    color: var(--primary-600);
+    cursor: pointer;
+    flex: 0 0 auto;
+    font-size: 12px;
+    font-weight: 800;
+    padding: 8px 10px;
+    transition: var(--transition);
+}
+
+.edit-user-name-btn-new:hover {
+    background: var(--primary-50);
+    transform: translateY(-1px);
 }
 
 .selected-user-usage-new {
@@ -2543,7 +2566,8 @@ body:not([data-theme="dark"]) .message-actions-new .msg-btn-new:hover {
 [data-theme="dark"] .selected-user-usage-new div,
 [data-theme="dark"] .selected-user-details-grid-new div,
 [data-theme="dark"] .notification-compose-new input,
-[data-theme="dark"] .notification-compose-new textarea {
+[data-theme="dark"] .notification-compose-new textarea,
+[data-theme="dark"] .edit-user-name-btn-new {
     background: var(--gray-50);
     border-color: var(--gray-200);
 }
