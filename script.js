@@ -1157,6 +1157,13 @@ function getUserEmail(user = {}) {
     return user.userEmail || user.email || user.accountEmail || '';
 }
 
+function findUsersByKey(userKey) {
+    return {
+        reports: allUsers.filter(user => getUserKey(user) === userKey),
+        appUser: appUsers.find(user => getUserKey(user) === userKey)
+    };
+}
+
 function getFcmTokens(user = {}) {
     const tokens = [];
     [
@@ -1546,10 +1553,11 @@ function renderSelectedUserDetails() {
     selectedUserDetails.innerHTML = `
         <div class="selected-user-head-new">
             <div class="selected-user-avatar-new">${renderUserAvatar(user, getDisplayName(user))}</div>
-            <div>
+            <div class="selected-user-title-new">
                 <h3>${escapeHtml(getDisplayName(user))}</h3>
                 <p>${escapeHtml(getUserEmail(user) || getUserKey(user))}</p>
             </div>
+            <button type="button" class="edit-user-name-btn-new" id="editSelectedUserNameBtn">تعديل الاسم</button>
         </div>
         <div class="selected-user-usage-new">
             <div><strong>${formatUsage(usage.daily)}</strong><span>يومي</span></div>
@@ -1562,6 +1570,68 @@ function renderSelectedUserDetails() {
             `).join('')}
         </div>
     `;
+
+    const editNameBtn = document.getElementById('editSelectedUserNameBtn');
+    if (editNameBtn) {
+        editNameBtn.addEventListener('click', () => editUserName(getUserKey(user)));
+    }
+}
+
+async function editUserName(userKey) {
+    const user = buildNotificationUsers().find(item => getUserKey(item) === userKey);
+    if (!user) return;
+
+    const currentName = getDisplayName(user);
+    const newName = prompt('اكتب اسم المستخدم الجديد:', currentName);
+    if (newName === null) return;
+
+    const cleanName = newName.trim();
+    if (!cleanName) {
+        showToast('لا يمكن ترك الاسم فارغاً', true);
+        return;
+    }
+
+    try {
+        const { reports, appUser } = findUsersByKey(userKey);
+        const updates = [];
+
+        if (appUser?.id) {
+            updates.push(updateDoc(doc(db, USERS_COLLECTION_NAME, appUser.id), {
+                userName: cleanName,
+                displayName: cleanName,
+                nameUpdatedAt: Date.now()
+            }));
+        }
+
+        reports.forEach(report => {
+            updates.push(updateDoc(doc(db, COLLECTION_NAME, report.id), {
+                userName: cleanName,
+                displayName: cleanName,
+                nameUpdatedAt: Date.now()
+            }));
+        });
+
+        await Promise.all(updates);
+
+        appUsers = appUsers.map(item => getUserKey(item) === userKey ? { ...item, userName: cleanName, displayName: cleanName } : item);
+        allUsers = allUsers.map(item => getUserKey(item) === userKey ? { ...item, userName: cleanName, displayName: cleanName } : item);
+
+        if (selectedUserId) {
+            const selected = allUsers.find(item => item.id === selectedUserId);
+            if (selected && getUserKey(selected) === userKey) {
+                const userNameElem = document.getElementById('userName');
+                if (userNameElem) userNameElem.textContent = cleanName;
+            }
+        }
+
+        renderNotificationUsers();
+        renderSelectedUserDetails();
+        renderUsersList();
+        showToast('تم تحديث اسم المستخدم');
+    } catch (error) {
+        console.error('خطأ في تعديل اسم المستخدم:', error);
+        showToast('فشل تعديل اسم المستخدم', true);
+    }
 }
 
 function toggleSelectAllNotificationUsers() {
