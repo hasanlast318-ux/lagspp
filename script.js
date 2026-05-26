@@ -7,6 +7,9 @@ const db = window.db;
 const auth = window.auth;
 const storage = window.storage || (window.firebaseApp ? getStorage(window.firebaseApp) : null);
 const COLLECTION_NAME = "reports";
+const USERS_COLLECTION_NAME = "users";
+const NOTIFICATION_REQUESTS_COLLECTION = "notificationRequests";
+const USER_DELETION_REQUESTS_COLLECTION = "userDeletionRequests";
 const GAS_URL = "https://script.google.com/macros/s/AKfycbzPymoY-eLQdGfkxvX_BeDYRma4gBM8murSh3cEsT_z9CDOkBHXuxdz_8xALzAxzA3FtA/exec";
 const MAX_ATTACHMENT_SIZE = 50 * 1024 * 1024;
 const PRESENCE_REFRESH_INTERVAL = 5000;
@@ -15,7 +18,10 @@ const REPORT_PAGE_HEARTBEAT_TIMEOUT = 9000;
 
 // متغيرات عامة
 let allUsers = [];
+let appUsers = [];
 let selectedUserId = null;
+let activeView = 'chat';
+let selectedNotificationUserId = null;
 let currentMessages = [];
 let messageListener = null;
 let currentTheme = 'light';
@@ -24,6 +30,8 @@ let selectedAttachmentKind = null;
 let attachmentPreviewUrl = null;
 let isSendingMessage = false;
 let presenceRefreshTimer = null;
+const selectedConversationIds = new Set();
+const selectedNotificationUserIds = new Set();
 const resolvedAttachmentUrls = new Map();
 
 // عناصر DOM للتسجيل الدخول
@@ -63,7 +71,32 @@ const deleteChatBtn = document.getElementById('deleteChatBtn');
 const statusDropdown = document.getElementById('statusDropdown');
 const themeToggleBtn = document.getElementById('themeToggleBtn');
 const collapseBtn = document.getElementById('collapseSidebar');
+const restoreSidebarBtn = document.getElementById('restoreSidebarBtn');
 const conversationsCountSpan = document.getElementById('conversationsCount');
+const selectAllConversations = document.getElementById('selectAllConversations');
+const deleteSelectedChatsBtn = document.getElementById('deleteSelectedChatsBtn');
+const selectedChatsCount = document.getElementById('selectedChatsCount');
+const mediaViewer = document.getElementById('mediaViewer');
+const mediaViewerBody = document.getElementById('mediaViewerBody');
+const mediaViewerTitle = document.getElementById('mediaViewerTitle');
+const mediaViewerOpenLink = document.getElementById('mediaViewerOpenLink');
+const mediaViewerCloseBtn = document.getElementById('mediaViewerCloseBtn');
+const mediaViewerBackdrop = document.getElementById('mediaViewerBackdrop');
+const chatViewBtn = document.getElementById('chatViewBtn');
+const usersViewBtn = document.getElementById('usersViewBtn');
+const usersPage = document.getElementById('usersPage');
+const usersTableList = document.getElementById('usersTableList');
+const usersSearchInput = document.getElementById('usersSearchInput');
+const usersPresenceFilter = document.getElementById('usersPresenceFilter');
+const selectAllNotificationUsers = document.getElementById('selectAllNotificationUsers');
+const deleteSelectedUsersBtn = document.getElementById('deleteSelectedUsersBtn');
+const allUsersCount = document.getElementById('allUsersCount');
+const notificationSelectedCount = document.getElementById('notificationSelectedCount');
+const selectedUserDetails = document.getElementById('selectedUserDetails');
+const notificationTitleInput = document.getElementById('notificationTitleInput');
+const notificationBodyInput = document.getElementById('notificationBodyInput');
+const notificationLinkInput = document.getElementById('notificationLinkInput');
+const sendNotificationBtn = document.getElementById('sendNotificationBtn');
 
 // عناصر الـ Modal المخصصة لتعديل الرسالة
 let editingMessageId = null;
@@ -416,10 +449,30 @@ function renderReportAttachments(user = {}) {
     return `
         <div class="problem-message-new report-attachments-new">
             <strong>مرفقات البلاغ:</strong>
-            <div class="message-attachments-new">
-                ${attachments.map(renderAttachment).join('')}
+            <div class="report-attachments-grid-new">
+                ${attachments.map(renderCompactAttachment).join('')}
             </div>
         </div>
+    `;
+}
+
+function renderCompactAttachment(attachment) {
+    const url = escapeHtml(attachment.url);
+    const name = escapeHtml(attachment.name);
+    const type = escapeHtml(attachment.type);
+
+    if (attachment.type === 'video') {
+        return `
+            <button type="button" class="report-media-compact-new" data-media-url="${url}" data-media-type="${type}" data-media-name="${name}" title="${name}">
+                <video class="report-media-compact-video-new" preload="metadata" src="${url}"></video>
+            </button>
+        `;
+    }
+
+    return `
+        <button type="button" class="report-media-compact-new" data-media-url="${url}" data-media-type="${type}" data-media-name="${name}" title="${name}">
+            <img class="report-media-compact-image-new" src="${url}" alt="${name}" loading="lazy">
+        </button>
     `;
 }
 
@@ -465,15 +518,19 @@ async function resolveUserAttachmentUrls(user = {}) {
 function renderAttachment(attachment) {
     const url = escapeHtml(attachment.url);
     const name = escapeHtml(attachment.name);
+    const type = escapeHtml(attachment.type);
 
     if (attachment.type === 'video') {
         return `
             <div class="message-media-shell-new video-shell-new">
                 <div class="message-media-top-new">
                     <span class="message-media-type-new">فيديو</span>
-                    <a class="message-media-open-new" href="${url}" target="_blank" rel="noopener noreferrer">فتح</a>
+                    <button type="button" class="message-media-preview-new" data-media-url="${url}" data-media-type="${type}" data-media-name="${name}">عرض</button>
+                    <a class="message-media-open-new" href="${url}" target="_blank" rel="noopener noreferrer">فتح الرابط</a>
                 </div>
-                <video class="message-video-new" controls preload="metadata" src="${url}"></video>
+                <button type="button" class="message-media-preview-frame-new" data-media-url="${url}" data-media-type="${type}" data-media-name="${name}">
+                    <video class="message-video-new" preload="metadata" src="${url}"></video>
+                </button>
                 <div class="message-media-name-new">${name}</div>
             </div>
         `;
@@ -483,11 +540,12 @@ function renderAttachment(attachment) {
         <div class="message-media-shell-new image-shell-new">
             <div class="message-media-top-new">
                 <span class="message-media-type-new">صورة</span>
-                <a class="message-media-open-new" href="${url}" target="_blank" rel="noopener noreferrer">فتح</a>
+                <button type="button" class="message-media-preview-new" data-media-url="${url}" data-media-type="${type}" data-media-name="${name}">عرض</button>
+                <a class="message-media-open-new" href="${url}" target="_blank" rel="noopener noreferrer">فتح الرابط</a>
             </div>
-            <a class="message-image-link-new" href="${url}" target="_blank" rel="noopener noreferrer">
+            <button type="button" class="message-media-preview-frame-new" data-media-url="${url}" data-media-type="${type}" data-media-name="${name}">
                 <img class="message-image-new" src="${url}" alt="${name}" loading="lazy">
-            </a>
+            </button>
             <div class="message-media-name-new">${name}</div>
         </div>
     `;
@@ -502,6 +560,37 @@ function renderMessageAttachments(message) {
             ${attachments.map(renderAttachment).join('')}
         </div>
     `;
+}
+
+function openMediaViewer(url, type, name = 'مرفق') {
+    if (!mediaViewer || !mediaViewerBody) return;
+
+    const safeUrl = safeMediaUrl(url);
+    if (!safeUrl) return;
+
+    if (mediaViewerTitle) mediaViewerTitle.textContent = name || 'مرفق';
+    if (mediaViewerOpenLink) mediaViewerOpenLink.href = safeUrl;
+    mediaViewerBody.innerHTML = type === 'video'
+        ? `<video class="media-viewer-video" controls autoplay src="${escapeHtml(safeUrl)}"></video>`
+        : `<img class="media-viewer-image" src="${escapeHtml(safeUrl)}" alt="${escapeHtml(name || 'مرفق')}">`;
+    mediaViewer.style.display = 'flex';
+    document.body.classList.add('media-viewer-open');
+}
+
+function closeMediaViewer() {
+    if (!mediaViewer || !mediaViewerBody) return;
+
+    mediaViewer.style.display = 'none';
+    mediaViewerBody.innerHTML = '';
+    document.body.classList.remove('media-viewer-open');
+}
+
+function bindMediaPreviewButtons() {
+    document.querySelectorAll('.message-media-preview-new, .message-media-preview-frame-new, .report-media-compact-new').forEach(button => {
+        button.addEventListener('click', () => {
+            openMediaViewer(button.dataset.mediaUrl, button.dataset.mediaType, button.dataset.mediaName);
+        });
+    });
 }
 
 function getMessagePreview(message) {
@@ -551,6 +640,8 @@ function firstTextValue(...values) {
 
 function getUserLocationText(user = {}) {
     const presence = user.presence || user.userPresence || user.statusInfo || {};
+    const level = user.level || user.currentLevel || user.levelNumber || presence.level || presence.currentLevel || '';
+    const lesson = user.lessonNumber || user.currentLessonNumber || user.lessonNo || user.lesson || presence.lessonNumber || presence.currentLessonNumber || '';
     const page = firstTextValue(user.currentPage, user.activePage, user.screen, user.route, user.currentRoute);
     const location = firstTextValue(
         user.userLocation,
@@ -599,11 +690,44 @@ function getUserLocationText(user = {}) {
         presence.currentTabName
     );
 
+    if (level && lesson) return `المستوى ${level} - الدرس ${lesson}`;
     if (location && detail && location !== detail) return `${location} - ${detail}`;
     if (location) return location;
     if (detail) return detail;
     if (page && !['app', 'report', 'offline'].includes(page.toLowerCase())) return page;
     return '';
+}
+
+function getUserAvatarUrl(user = {}) {
+    const profile = user.profile || user.userProfile || user.account || {};
+    return safeMediaUrl(
+        user.userAvatarUrl ||
+        user.avatarUrl ||
+        user.profileImageUrl ||
+        user.profilePhotoUrl ||
+        user.userImageUrl ||
+        user.userPhotoUrl ||
+        user.photoURL ||
+        user.photoUrl ||
+        user.pictureUrl ||
+        user.profilePictureUrl ||
+        profile.userAvatarUrl ||
+        profile.avatarUrl ||
+        profile.profileImageUrl ||
+        profile.profilePhotoUrl ||
+        profile.photoURL ||
+        profile.photoUrl ||
+        profile.pictureUrl
+    );
+}
+
+function renderUserAvatar(user = {}, displayName = '') {
+    const avatarUrl = getUserAvatarUrl(user);
+    if (avatarUrl) {
+        return `<img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(displayName || 'المستخدم')}" loading="lazy">`;
+    }
+
+    return escapeHtml((displayName || '؟').charAt(0).toUpperCase());
 }
 
 function getPresenceState(user = {}) {
@@ -1017,6 +1141,111 @@ function toggleTheme() {
 }
 
 // ========== دوال المستخدمين والمحادثات ==========
+function getUserKey(user = {}) {
+    return String(user.userId || user.uid || user.id || user.userEmail || user.email || user.reportId || '').trim();
+}
+
+function getAuthUid(user = {}) {
+    return String(user.uid || user.authUid || user.firebaseUid || user.userId || '').trim();
+}
+
+function getDisplayName(user = {}) {
+    return user.userName || user.displayName || user.name || user.fullName || user.userEmail || user.email || user.userId || user.uid || 'مستخدم مجهول';
+}
+
+function getUserEmail(user = {}) {
+    return user.userEmail || user.email || user.accountEmail || '';
+}
+
+function getFcmTokens(user = {}) {
+    const tokens = [];
+    [
+        user.fcmToken,
+        user.fcm_token,
+        user.messagingToken,
+        user.notificationToken,
+        user.deviceToken,
+        user.pushToken,
+        user.tokens,
+        user.fcmTokens,
+        user.notificationTokens
+    ].forEach(value => {
+        if (Array.isArray(value)) tokens.push(...value);
+        else if (value && typeof value === 'object') tokens.push(...Object.values(value));
+        else if (typeof value === 'string') tokens.push(value);
+    });
+
+    return [...new Set(tokens.filter(Boolean))];
+}
+
+function readUsageValue(user = {}, keys = []) {
+    for (const key of keys) {
+        const value = user[key] ?? user.usageStats?.[key] ?? user.analytics?.[key] ?? user.activity?.[key];
+        if (typeof value === 'number') return value;
+        if (typeof value === 'string' && value.trim() && !Number.isNaN(Number(value))) return Number(value);
+    }
+    return 0;
+}
+
+function getUsageStats(user = {}) {
+    return {
+        daily: readUsageValue(user, ['dailyUsageMinutes', 'avgDailyUsageMinutes', 'dailyAverageMinutes', 'todayUsageMinutes', 'usageTodayMinutes']),
+        weekly: readUsageValue(user, ['weeklyUsageMinutes', 'avgWeeklyUsageMinutes', 'weeklyAverageMinutes', 'weekUsageMinutes']),
+        monthly: readUsageValue(user, ['monthlyUsageMinutes', 'avgMonthlyUsageMinutes', 'monthlyAverageMinutes', 'monthUsageMinutes'])
+    };
+}
+
+function formatUsage(minutes) {
+    if (!minutes) return 'غير متوفر';
+    if (minutes < 60) return `${Math.round(minutes)} د`;
+    const hours = Math.floor(minutes / 60);
+    const rest = Math.round(minutes % 60);
+    return rest ? `${hours} س ${rest} د` : `${hours} س`;
+}
+
+function buildNotificationUsers() {
+    const merged = new Map();
+
+    [...appUsers, ...allUsers].forEach(rawUser => {
+        const key = getUserKey(rawUser);
+        if (!key) return;
+        const existing = merged.get(key) || {};
+        merged.set(key, { ...existing, ...rawUser, notificationUserId: key });
+    });
+
+    return [...merged.values()].sort((a, b) => {
+        const usageA = getUsageStats(a).daily;
+        const usageB = getUsageStats(b).daily;
+        return usageB - usageA || getDisplayName(a).localeCompare(getDisplayName(b), 'ar');
+    });
+}
+
+function getFilteredNotificationUsers() {
+    const search = usersSearchInput ? usersSearchInput.value.trim().toLowerCase() : '';
+    const presenceFilter = usersPresenceFilter ? usersPresenceFilter.value : 'all';
+    return buildNotificationUsers().filter(user => {
+        const text = `${getDisplayName(user)} ${getUserEmail(user)} ${getUserKey(user)}`.toLowerCase();
+        const presence = getPresenceState(user);
+        const matchesPresence =
+            presenceFilter === 'all' ||
+            (presenceFilter === 'online' && presence.className !== 'offline') ||
+            (presenceFilter === 'offline' && presence.className === 'offline');
+        return text.includes(search) && matchesPresence;
+    });
+}
+
+function setActiveView(view) {
+    activeView = view;
+    const isUsers = view === 'users';
+
+    if (usersPage) usersPage.style.display = isUsers ? 'flex' : 'none';
+    const chatMain = document.querySelector('.chat-main');
+    if (chatMain) chatMain.style.display = isUsers ? 'none' : 'flex';
+    if (chatViewBtn) chatViewBtn.classList.toggle('active', !isUsers);
+    if (usersViewBtn) usersViewBtn.classList.toggle('active', isUsers);
+    if (isUsers) renderNotificationUsers();
+}
+
 function loadUsers() {
     const q = query(collection(db, COLLECTION_NAME));
     
@@ -1039,12 +1268,16 @@ function loadUsers() {
         });
         
         allUsers.sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
+        selectedConversationIds.forEach(id => {
+            if (!allUsers.some(user => user.id === id)) selectedConversationIds.delete(id);
+        });
         
         if (usersCountSpan) usersCountSpan.textContent = allUsers.length;
         if (totalTicketsSpan) totalTicketsSpan.textContent = allUsers.filter(u => u.status !== 'Solved').length;
         if (conversationsCountSpan) conversationsCountSpan.textContent = allUsers.length;
         
         renderUsersList();
+        if (activeView === 'users') renderNotificationUsers();
         
         if (allUsers.length === 0) {
             console.warn('⚠️ لا توجد بيانات في قاعدة البيانات بعد!');
@@ -1052,6 +1285,29 @@ function loadUsers() {
     }, (error) => {
         console.error('❌ خطأ في تحميل البيانات:', error);
         showToast('❌ خطأ في تحميل البيانات: ' + error.message, true);
+    });
+}
+
+function loadAppUsers() {
+    const q = query(collection(db, USERS_COLLECTION_NAME));
+
+    onSnapshot(q, (snapshot) => {
+        appUsers = [];
+        snapshot.forEach(userDoc => {
+            appUsers.push({
+                id: userDoc.id,
+                uid: userDoc.id,
+                ...userDoc.data()
+            });
+        });
+
+        selectedNotificationUserIds.forEach(id => {
+            if (!buildNotificationUsers().some(user => getUserKey(user) === id)) selectedNotificationUserIds.delete(id);
+        });
+
+        if (activeView === 'users') renderNotificationUsers();
+    }, (error) => {
+        console.warn('تعذر تحميل مجموعة users، سيتم الاعتماد على بيانات البلاغات فقط:', error);
     });
 }
 
@@ -1066,6 +1322,7 @@ function renderUsersList() {
     
     if (filteredUsers.length === 0) {
         conversationsList.innerHTML = '<div class="loading-state"><p>لا يوجد مستخدمين</p></div>';
+        updateBulkActionsUI(filteredUsers);
         return;
     }
     
@@ -1073,10 +1330,15 @@ function renderUsersList() {
         const displayName = user.userName || user.userEmail || user.userId || 'مستخدم مجهول';
         const isActive = selectedUserId === user.id;
         const presence = getPresenceState(user);
+        const isChecked = selectedConversationIds.has(user.id);
         return `
-            <div class="conversation-item-new ${isActive ? 'active' : ''}" data-user-id="${user.id}">
+            <div class="conversation-item-new ${isActive ? 'active' : ''} ${isChecked ? 'selected' : ''}" data-user-id="${user.id}">
+                <label class="conversation-select-new" title="تحديد المحادثة">
+                    <input type="checkbox" class="conversation-checkbox-new" data-user-id="${user.id}" ${isChecked ? 'checked' : ''}>
+                    <span></span>
+                </label>
                 <div class="conversation-avatar-new">
-                    ${displayName.charAt(0).toUpperCase()}
+                    ${renderUserAvatar(user, displayName)}
                     <span class="avatar-status-dot ${presence.className}" title="${escapeHtml(presence.text)}"></span>
                 </div>
                 <div class="conversation-content-new">
@@ -1090,6 +1352,8 @@ function renderUsersList() {
             </div>
         `;
     }).join('');
+
+    updateBulkActionsUI(filteredUsers);
     
     document.querySelectorAll('.conversation-item-new').forEach(item => {
         item.addEventListener('click', () => {
@@ -1097,6 +1361,261 @@ function renderUsersList() {
             selectUser(userId);
         });
     });
+
+    document.querySelectorAll('.conversation-checkbox-new').forEach(checkbox => {
+        checkbox.addEventListener('click', (event) => {
+            event.stopPropagation();
+        });
+        checkbox.addEventListener('change', () => {
+            if (checkbox.checked) {
+                selectedConversationIds.add(checkbox.dataset.userId);
+            } else {
+                selectedConversationIds.delete(checkbox.dataset.userId);
+            }
+            renderUsersList();
+        });
+    });
+
+    document.querySelectorAll('.conversation-select-new').forEach(label => {
+        label.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const checkbox = label.querySelector('.conversation-checkbox-new');
+            if (!checkbox) return;
+            const userId = checkbox.dataset.userId;
+            if (selectedConversationIds.has(userId)) {
+                selectedConversationIds.delete(userId);
+            } else {
+                selectedConversationIds.add(userId);
+            }
+            renderUsersList();
+        });
+    });
+}
+
+function getVisibleConversationIds() {
+    const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+    return allUsers
+        .filter(user => {
+            const searchText = (user.userName || user.userEmail || user.userId || '').toLowerCase();
+            return searchText.includes(searchTerm);
+        })
+        .map(user => user.id);
+}
+
+function updateBulkActionsUI(visibleUsers = null) {
+    const visibleIds = visibleUsers ? visibleUsers.map(user => user.id) : getVisibleConversationIds();
+    const selectedVisibleCount = visibleIds.filter(id => selectedConversationIds.has(id)).length;
+    const selectedTotal = selectedConversationIds.size;
+
+    if (selectedChatsCount) selectedChatsCount.textContent = selectedTotal;
+    if (deleteSelectedChatsBtn) deleteSelectedChatsBtn.disabled = selectedTotal === 0;
+    if (selectAllConversations) {
+        selectAllConversations.checked = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
+        selectAllConversations.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visibleIds.length;
+    }
+}
+
+function toggleSelectAllConversations() {
+    const visibleIds = getVisibleConversationIds();
+    const shouldSelect = selectAllConversations ? selectAllConversations.checked : false;
+
+    visibleIds.forEach(id => {
+        if (shouldSelect) {
+            selectedConversationIds.add(id);
+        } else {
+            selectedConversationIds.delete(id);
+        }
+    });
+    renderUsersList();
+}
+
+function updateNotificationSelectionUI(users = null) {
+    const visibleUsers = users || getFilteredNotificationUsers();
+    const visibleIds = visibleUsers.map(user => getUserKey(user));
+    const selectedVisible = visibleIds.filter(id => selectedNotificationUserIds.has(id)).length;
+
+    if (allUsersCount) allUsersCount.textContent = buildNotificationUsers().length;
+    if (notificationSelectedCount) notificationSelectedCount.textContent = selectedNotificationUserIds.size;
+    if (sendNotificationBtn) sendNotificationBtn.disabled = selectedNotificationUserIds.size === 0;
+    if (deleteSelectedUsersBtn) deleteSelectedUsersBtn.disabled = selectedNotificationUserIds.size === 0;
+    if (selectAllNotificationUsers) {
+        selectAllNotificationUsers.checked = visibleIds.length > 0 && selectedVisible === visibleIds.length;
+        selectAllNotificationUsers.indeterminate = selectedVisible > 0 && selectedVisible < visibleIds.length;
+    }
+}
+
+function renderNotificationUsers() {
+    if (!usersTableList) return;
+
+    const users = getFilteredNotificationUsers();
+    if (users.length === 0) {
+        usersTableList.innerHTML = '<div class="users-empty-new">لا توجد بيانات مستخدمين بعد</div>';
+        updateNotificationSelectionUI(users);
+        return;
+    }
+
+    usersTableList.innerHTML = users.map(user => {
+        const key = getUserKey(user);
+        const usage = getUsageStats(user);
+        const presence = getPresenceState(user);
+        const checked = selectedNotificationUserIds.has(key);
+        const tokensCount = getFcmTokens(user).length;
+
+        return `
+            <div class="user-row-new ${selectedNotificationUserId === key ? 'active' : ''}" data-user-key="${escapeHtml(key)}">
+                <label class="user-row-check-new">
+                    <input type="checkbox" class="notification-user-checkbox" data-user-key="${escapeHtml(key)}" ${checked ? 'checked' : ''}>
+                </label>
+                <div class="user-row-profile-new">
+                    <div class="user-row-avatar-new">${renderUserAvatar(user, getDisplayName(user))}</div>
+                    <div>
+                        <strong>${escapeHtml(getDisplayName(user))}</strong>
+                        <span>${escapeHtml(getUserEmail(user) || key)}</span>
+                    </div>
+                </div>
+                <div class="usage-pill-new" data-label="اليومي">${formatUsage(usage.daily)}</div>
+                <div class="usage-pill-new" data-label="الأسبوعي">${formatUsage(usage.weekly)}</div>
+                <div class="usage-pill-new" data-label="الشهري">${formatUsage(usage.monthly)}</div>
+                <div class="user-status-pill-new ${presence.className}" data-label="الحالة" title="${escapeHtml(tokensCount ? `${tokensCount} رمز إشعار` : 'لا يوجد رمز إشعار محفوظ')}">${escapeHtml(presence.text)}</div>
+            </div>
+        `;
+    }).join('');
+
+    updateNotificationSelectionUI(users);
+
+    document.querySelectorAll('.notification-user-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('click', event => event.stopPropagation());
+        checkbox.addEventListener('change', () => {
+            if (checkbox.checked) selectedNotificationUserIds.add(checkbox.dataset.userKey);
+            else selectedNotificationUserIds.delete(checkbox.dataset.userKey);
+            renderNotificationUsers();
+        });
+    });
+
+    document.querySelectorAll('.user-row-check-new').forEach(area => {
+        area.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const checkbox = area.querySelector('.notification-user-checkbox');
+            if (!checkbox) return;
+            const userKey = checkbox.dataset.userKey;
+            if (selectedNotificationUserIds.has(userKey)) {
+                selectedNotificationUserIds.delete(userKey);
+            } else {
+                selectedNotificationUserIds.add(userKey);
+            }
+            renderNotificationUsers();
+        });
+    });
+
+    document.querySelectorAll('.user-row-new').forEach(row => {
+        row.addEventListener('click', () => {
+            selectedNotificationUserId = row.dataset.userKey;
+            renderNotificationUsers();
+            renderSelectedUserDetails();
+        });
+    });
+}
+
+function renderSelectedUserDetails() {
+    if (!selectedUserDetails) return;
+
+    const user = buildNotificationUsers().find(item => getUserKey(item) === selectedNotificationUserId);
+    if (!user) {
+        selectedUserDetails.innerHTML = '<div class="empty-user-details-new">اضغط على مستخدم لعرض تفاصيله الكاملة.</div>';
+        return;
+    }
+
+    const usage = getUsageStats(user);
+    const tokens = getFcmTokens(user);
+    const detailRows = [
+        ['الاسم', getDisplayName(user)],
+        ['البريد', getUserEmail(user)],
+        ['معرف المستخدم', user.userId || user.uid],
+        ['رقم آخر بلاغ', user.reportId],
+        ['الجهاز', user.device],
+        ['الصفحة الحالية', getUserLocationText(user)],
+        ['إصدار التطبيق', user.appVersion],
+        ['رموز FCM', tokens.length ? `${tokens.length} محفوظ` : 'غير متوفر'],
+        ['متوسط يومي', formatUsage(usage.daily)],
+        ['متوسط أسبوعي', formatUsage(usage.weekly)],
+        ['متوسط شهري', formatUsage(usage.monthly)]
+    ].filter(([, value]) => value);
+
+    selectedUserDetails.innerHTML = `
+        <div class="selected-user-head-new">
+            <div class="selected-user-avatar-new">${renderUserAvatar(user, getDisplayName(user))}</div>
+            <div>
+                <h3>${escapeHtml(getDisplayName(user))}</h3>
+                <p>${escapeHtml(getUserEmail(user) || getUserKey(user))}</p>
+            </div>
+        </div>
+        <div class="selected-user-usage-new">
+            <div><strong>${formatUsage(usage.daily)}</strong><span>يومي</span></div>
+            <div><strong>${formatUsage(usage.weekly)}</strong><span>أسبوعي</span></div>
+            <div><strong>${formatUsage(usage.monthly)}</strong><span>شهري</span></div>
+        </div>
+        <div class="selected-user-details-grid-new">
+            ${detailRows.map(([label, value]) => `
+                <div><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function toggleSelectAllNotificationUsers() {
+    const users = getFilteredNotificationUsers();
+    const shouldSelect = selectAllNotificationUsers ? selectAllNotificationUsers.checked : false;
+
+    users.forEach(user => {
+        const key = getUserKey(user);
+        if (shouldSelect) selectedNotificationUserIds.add(key);
+        else selectedNotificationUserIds.delete(key);
+    });
+
+    renderNotificationUsers();
+}
+
+async function sendNotificationRequest() {
+    const title = notificationTitleInput ? notificationTitleInput.value.trim() : '';
+    const body = notificationBodyInput ? notificationBodyInput.value.trim() : '';
+    const link = notificationLinkInput ? notificationLinkInput.value.trim() : '';
+    const recipients = buildNotificationUsers().filter(user => selectedNotificationUserIds.has(getUserKey(user)));
+
+    if (!title || !body || recipients.length === 0) {
+        showToast('اكتب عنوان الإشعار ونصه وحدد مستخدماً واحداً على الأقل', true);
+        return;
+    }
+
+    try {
+        if (sendNotificationBtn) sendNotificationBtn.disabled = true;
+        await addDoc(collection(db, NOTIFICATION_REQUESTS_COLLECTION), {
+            title,
+            body,
+            link,
+            status: 'pending',
+            createdAt: Date.now(),
+            createdBy: auth?.currentUser?.email || '',
+            recipients: recipients.map(user => ({
+                userKey: getUserKey(user),
+                userId: user.userId || user.uid || '',
+                name: getDisplayName(user),
+                email: getUserEmail(user),
+                tokens: getFcmTokens(user)
+            }))
+        });
+
+        showToast(`تم إنشاء طلب إشعار لـ ${recipients.length} مستخدم`);
+        if (notificationTitleInput) notificationTitleInput.value = '';
+        if (notificationBodyInput) notificationBodyInput.value = '';
+        if (notificationLinkInput) notificationLinkInput.value = '';
+    } catch (error) {
+        console.error('خطأ في إنشاء طلب الإشعار:', error);
+        showToast('فشل إنشاء طلب الإشعار', true);
+    } finally {
+        updateNotificationSelectionUI();
+    }
 }
 
 function openMobileSidebar() {
@@ -1152,7 +1671,7 @@ async function selectUser(userId) {
     const userAvatarElem = document.getElementById('userAvatar');
     
     if (userNameElem) userNameElem.textContent = displayName;
-    if (userAvatarElem) userAvatarElem.innerHTML = `<span>${displayName.charAt(0).toUpperCase()}</span>`;
+    if (userAvatarElem) userAvatarElem.innerHTML = renderUserAvatar(user, displayName);
     
     updateUserPresenceUI(user);
     
@@ -1211,6 +1730,7 @@ async function markMessagesAsRead(userId, messages) {
 
 function renderMessages(messages) {
     if (!messagesList) return;
+    const shouldStickToBottom = !messagesContainer || (messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 120);
     
     let messagesHtml = '';
     const user = allUsers.find(u => u.id === selectedUserId);
@@ -1220,12 +1740,10 @@ function renderMessages(messages) {
         // Find the problem description from any common fields
         const problemDescription = getReportText(user);
         
-        const firstUserMsg = (messages || []).find(m => m.sender === 'user');
-        const firstUserMsgText = firstUserMsg ? firstUserMsg.text : '';
-        const hasDiffFirstMsg = firstUserMsgText && firstUserMsgText.trim() !== problemDescription.trim();
+        const reportAttachmentsHtml = renderReportAttachments(user);
 
         messagesHtml += `
-            <div class="problem-details-new">
+            <div class="problem-details-new ${reportAttachmentsHtml ? 'has-report-attachments-new' : 'no-report-attachments-new'}">
                 <div class="details-title-new">
                     <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
                         <path d="M10 18C14.4183 18 18 14.4183 18 10C18 5.58172 14.4183 2 10 2C5.58172 2 2 5.58172 2 10C2 14.4183 5.58172 18 10 18Z" stroke="white" stroke-width="1.5"/>
@@ -1233,21 +1751,24 @@ function renderMessages(messages) {
                     </svg>
                     تفاصيل التذكرة والمشكلة
                 </div>
-                <div class="details-grid-new">
-                    ${user.userName ? `<div class="detail-item-new"><span class="detail-label-new">اسم المستخدم</span><span class="detail-value-new">${escapeHtml(user.userName)}</span></div>` : ''}
-                    ${user.userEmail ? `<div class="detail-item-new"><span class="detail-label-new">البريد الإلكتروني</span><span class="detail-value-new">${escapeHtml(user.userEmail)}</span></div>` : ''}
-                    ${user.userId ? `<div class="detail-item-new"><span class="detail-label-new">معرف المستخدم</span><span class="detail-value-new">${escapeHtml(user.userId)}</span></div>` : ''}
-                    ${user.reportId ? `<div class="detail-item-new"><span class="detail-label-new">رقم التقرير</span><span class="detail-value-new">${escapeHtml(user.reportId)}</span></div>` : ''}
-                    ${user.device ? `<div class="detail-item-new"><span class="detail-label-new">الجهاز</span><span class="detail-value-new">${escapeHtml(user.device)}</span></div>` : ''}
-                    ${user.page ? `<div class="detail-item-new"><span class="detail-label-new">الصفحة</span><span class="detail-value-new">${escapeHtml(user.page)}</span></div>` : ''}
-                    ${user.part ? `<div class="detail-item-new"><span class="detail-label-new">القسم</span><span class="detail-value-new">${escapeHtml(user.part)}</span></div>` : ''}
-                    ${user.appVersion ? `<div class="detail-item-new"><span class="detail-label-new">إصدار التطبيق</span><span class="detail-value-new">${escapeHtml(user.appVersion)}</span></div>` : ''}
-                    ${user.status ? `<div class="detail-item-new"><span class="detail-label-new">الحالة</span><span class="detail-value-new">${escapeHtml(user.status)}</span></div>` : ''}
-                    ${user.timestamp ? `<div class="detail-item-new"><span class="detail-label-new">تاريخ التقرير</span><span class="detail-value-new">${new Date(user.timestamp).toLocaleString('ar-SA')}</span></div>` : ''}
+                <div class="problem-content-layout-new">
+                    <div class="problem-info-column-new">
+                        <div class="details-grid-new">
+                            ${user.userName ? `<div class="detail-item-new"><span class="detail-label-new">اسم المستخدم</span><span class="detail-value-new">${escapeHtml(user.userName)}</span></div>` : ''}
+                            ${user.userEmail ? `<div class="detail-item-new"><span class="detail-label-new">البريد الإلكتروني</span><span class="detail-value-new">${escapeHtml(user.userEmail)}</span></div>` : ''}
+                            ${user.userId ? `<div class="detail-item-new"><span class="detail-label-new">معرف المستخدم</span><span class="detail-value-new">${escapeHtml(user.userId)}</span></div>` : ''}
+                            ${user.reportId ? `<div class="detail-item-new"><span class="detail-label-new">رقم التقرير</span><span class="detail-value-new">${escapeHtml(user.reportId)}</span></div>` : ''}
+                            ${user.device ? `<div class="detail-item-new"><span class="detail-label-new">الجهاز</span><span class="detail-value-new">${escapeHtml(user.device)}</span></div>` : ''}
+                            ${user.page ? `<div class="detail-item-new"><span class="detail-label-new">الصفحة</span><span class="detail-value-new">${escapeHtml(user.page)}</span></div>` : ''}
+                            ${user.part ? `<div class="detail-item-new"><span class="detail-label-new">القسم</span><span class="detail-value-new">${escapeHtml(user.part)}</span></div>` : ''}
+                            ${user.appVersion ? `<div class="detail-item-new"><span class="detail-label-new">إصدار التطبيق</span><span class="detail-value-new">${escapeHtml(user.appVersion)}</span></div>` : ''}
+                            ${user.status ? `<div class="detail-item-new"><span class="detail-label-new">الحالة</span><span class="detail-value-new">${escapeHtml(user.status)}</span></div>` : ''}
+                            ${user.timestamp ? `<div class="detail-item-new"><span class="detail-label-new">تاريخ التقرير</span><span class="detail-value-new">${new Date(user.timestamp).toLocaleString('ar-SA')}</span></div>` : ''}
+                        </div>
+                        ${problemDescription ? `<div class="problem-message-new"><strong>📝 وصف المشكلة:</strong><br>${escapeHtml(problemDescription)}</div>` : ''}
+                    </div>
+                    ${reportAttachmentsHtml ? `<div class="problem-attachments-column-new">${reportAttachmentsHtml}</div>` : ''}
                 </div>
-                ${problemDescription ? `<div class="problem-message-new"><strong>📝 وصف المشكلة:</strong><br>${escapeHtml(problemDescription)}</div>` : ''}
-                ${renderReportAttachments(user)}
-                ${hasDiffFirstMsg ? `<div class="problem-message-new" style="background: rgba(255, 255, 255, 0.18); border-right: 3px solid #fff;"><strong>💬 رسالة المستخدم:</strong><br>${escapeHtml(firstUserMsgText)}</div>` : ''}
             </div>
         `;
     }
@@ -1303,10 +1824,14 @@ function renderMessages(messages) {
             deleteMessage(msgId);
         });
     });
+
+    bindMediaPreviewButtons();
     
-    setTimeout(() => {
-        if (messagesEnd) messagesEnd.scrollIntoView({ behavior: 'smooth' });
-    }, 100);
+    if (shouldStickToBottom) {
+        setTimeout(() => {
+            if (messagesEnd) messagesEnd.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
+    }
 }
 
 function editMessage(msgId) {
@@ -1577,6 +2102,12 @@ async function deleteChatAttachments(user) {
     }
 }
 
+async function deleteChatById(userId) {
+    const user = allUsers.find(item => item.id === userId);
+    if (user) await deleteChatAttachments(user);
+    await deleteDoc(doc(db, COLLECTION_NAME, userId));
+}
+
 function clearCurrentChatView() {
     selectedUserId = null;
     currentMessages = [];
@@ -1605,10 +2136,10 @@ async function deleteCurrentChat() {
     if (deleteChatBtn) deleteChatBtn.disabled = true;
 
     try {
-        await deleteChatAttachments(user);
-        await deleteDoc(doc(db, COLLECTION_NAME, selectedUserId));
+        await deleteChatById(selectedUserId);
 
         allUsers = allUsers.filter(item => item.id !== selectedUserId);
+        selectedConversationIds.delete(selectedUserId);
         clearCurrentChatView();
         renderUsersList();
 
@@ -1622,6 +2153,90 @@ async function deleteCurrentChat() {
         showToast('فشل حذف الدردشة', true);
     } finally {
         if (deleteChatBtn) deleteChatBtn.disabled = false;
+    }
+}
+
+async function deleteSelectedChats() {
+    const ids = [...selectedConversationIds].filter(id => allUsers.some(user => user.id === id));
+    if (ids.length === 0) return;
+
+    if (!confirm(`هل تريد حذف ${ids.length} محادثة محددة؟ سيتم حذفها من Firebase مع المرفقات ولا يمكن التراجع.`)) return;
+
+    if (deleteSelectedChatsBtn) deleteSelectedChatsBtn.disabled = true;
+
+    try {
+        await Promise.all(ids.map(id => deleteChatById(id)));
+
+        allUsers = allUsers.filter(user => !ids.includes(user.id));
+        const deletedSelectedChat = selectedUserId && ids.includes(selectedUserId);
+        selectedConversationIds.clear();
+        if (deletedSelectedChat) clearCurrentChatView();
+        renderUsersList();
+
+        if (usersCountSpan) usersCountSpan.textContent = allUsers.length;
+        if (totalTicketsSpan) totalTicketsSpan.textContent = allUsers.filter(u => u.status !== 'Solved').length;
+        if (conversationsCountSpan) conversationsCountSpan.textContent = allUsers.length;
+
+        showToast(`تم حذف ${ids.length} محادثة`);
+    } catch (error) {
+        console.error('خطأ في حذف المحادثات المحددة:', error);
+        showToast('فشل حذف بعض المحادثات المحددة', true);
+    } finally {
+        updateBulkActionsUI();
+    }
+}
+
+async function deleteSelectedUsers() {
+    const ids = [...selectedNotificationUserIds];
+    if (ids.length === 0) return;
+
+    const message = `هل تريد حذف ${ids.length} مستخدم محدد من Firebase؟ سيتم حذف مستنداتهم من users وحذف بلاغاتهم ومرفقاتها إن وجدت.`;
+    if (!confirm(message)) return;
+
+    if (deleteSelectedUsersBtn) deleteSelectedUsersBtn.disabled = true;
+
+    try {
+        for (const userKey of ids) {
+            const relatedReports = allUsers.filter(user => getUserKey(user) === userKey);
+            const mergedUser = buildNotificationUsers().find(user => getUserKey(user) === userKey) || {};
+            for (const report of relatedReports) {
+                await deleteChatById(report.id);
+            }
+
+            const appUser = appUsers.find(user => getUserKey(user) === userKey);
+            if (appUser?.id) {
+                await deleteDoc(doc(db, USERS_COLLECTION_NAME, appUser.id));
+            }
+
+            const uid = getAuthUid({ ...mergedUser, ...appUser });
+            if (uid) {
+                await addDoc(collection(db, USER_DELETION_REQUESTS_COLLECTION), {
+                    uid,
+                    userKey,
+                    email: getUserEmail({ ...mergedUser, ...appUser }),
+                    status: 'pending',
+                    createdAt: Date.now(),
+                    createdBy: auth?.currentUser?.email || ''
+                });
+            }
+        }
+
+        allUsers = allUsers.filter(user => !ids.includes(getUserKey(user)));
+        appUsers = appUsers.filter(user => !ids.includes(getUserKey(user)));
+        if (selectedNotificationUserId && ids.includes(selectedNotificationUserId)) {
+            selectedNotificationUserId = null;
+            renderSelectedUserDetails();
+        }
+        selectedNotificationUserIds.clear();
+        renderNotificationUsers();
+        renderUsersList();
+
+        showToast(`تم حذف ${ids.length} مستخدم`);
+    } catch (error) {
+        console.error('خطأ في حذف المستخدمين:', error);
+        showToast('فشل حذف بعض المستخدمين', true);
+    } finally {
+        updateNotificationSelectionUI();
     }
 }
 
@@ -1710,6 +2325,11 @@ async function updateReportStatus() {
 function showUserInfo() {
     const user = allUsers.find(u => u.id === selectedUserId);
     if (!user || !infoContent) return;
+
+    if (infoPanel && infoPanel.style.display === 'block') {
+        infoPanel.style.display = 'none';
+        return;
+    }
     
     const infoRows = [
         { label: 'اسم المستخدم', value: user.userName },
@@ -1798,12 +2418,16 @@ function listenToUserUpdates() {
         
         updatedUsers.sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
         allUsers = updatedUsers;
+        selectedConversationIds.forEach(id => {
+            if (!allUsers.some(user => user.id === id)) selectedConversationIds.delete(id);
+        });
         
         if (usersCountSpan) usersCountSpan.textContent = allUsers.length;
         if (totalTicketsSpan) totalTicketsSpan.textContent = allUsers.filter(u => u.status !== 'Solved').length;
         if (conversationsCountSpan) conversationsCountSpan.textContent = allUsers.length;
         
         renderUsersList();
+        if (activeView === 'users') renderNotificationUsers();
     });
 }
 
@@ -1848,8 +2472,19 @@ function initEventListeners() {
     }
     
     if (sendBtn) sendBtn.addEventListener('click', handleSendOrSave);
+    if (chatViewBtn) chatViewBtn.addEventListener('click', () => setActiveView('chat'));
+    if (usersViewBtn) usersViewBtn.addEventListener('click', () => setActiveView('users'));
+    if (usersSearchInput) usersSearchInput.addEventListener('input', renderNotificationUsers);
+    if (usersPresenceFilter) usersPresenceFilter.addEventListener('change', renderNotificationUsers);
+    if (selectAllNotificationUsers) selectAllNotificationUsers.addEventListener('change', toggleSelectAllNotificationUsers);
+    if (deleteSelectedUsersBtn) deleteSelectedUsersBtn.addEventListener('click', deleteSelectedUsers);
+    if (sendNotificationBtn) sendNotificationBtn.addEventListener('click', sendNotificationRequest);
     if (showInfoBtn) showInfoBtn.addEventListener('click', showUserInfo);
     if (deleteChatBtn) deleteChatBtn.addEventListener('click', deleteCurrentChat);
+    if (selectAllConversations) selectAllConversations.addEventListener('change', toggleSelectAllConversations);
+    if (deleteSelectedChatsBtn) deleteSelectedChatsBtn.addEventListener('click', deleteSelectedChats);
+    if (mediaViewerCloseBtn) mediaViewerCloseBtn.addEventListener('click', closeMediaViewer);
+    if (mediaViewerBackdrop) mediaViewerBackdrop.addEventListener('click', closeMediaViewer);
     if (closeInfoBtn) closeInfoBtn.addEventListener('click', () => {
         if (infoPanel) infoPanel.style.display = 'none';
     });
@@ -1871,6 +2506,17 @@ function initEventListeners() {
     if (mobileMenuToggleBtn) {
         mobileMenuToggleBtn.addEventListener('click', (e) => {
             e.stopPropagation();
+            openMobileSidebar();
+        });
+    }
+
+    const usersMenuToggleBtn = document.getElementById('usersMenuToggleBtn');
+    if (usersMenuToggleBtn) {
+        usersMenuToggleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const sidebar = document.querySelector('.sidebar-new');
+            if (sidebar) sidebar.classList.remove('collapsed');
+            document.body.classList.remove('sidebar-collapsed');
             openMobileSidebar();
         });
     }
@@ -1919,6 +2565,10 @@ function initEventListeners() {
         }
     });
 
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeMediaViewer();
+    });
+
     document.querySelectorAll('.dropdown-item').forEach(item => {
         item.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -1941,6 +2591,15 @@ function initEventListeners() {
         collapseBtn.addEventListener('click', () => {
             const sidebar = document.querySelector('.sidebar-new');
             if (sidebar) sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed', sidebar?.classList.contains('collapsed'));
+        });
+    }
+
+    if (restoreSidebarBtn) {
+        restoreSidebarBtn.addEventListener('click', () => {
+            const sidebar = document.querySelector('.sidebar-new');
+            if (sidebar) sidebar.classList.remove('collapsed');
+            document.body.classList.remove('sidebar-collapsed');
         });
     }
     
@@ -1982,6 +2641,7 @@ function init() {
     }
     
     loadUsers();
+    loadAppUsers();
     listenToUserUpdates();
     startPresenceRefresh();
     showToast('✨ تم تشغيل لوحة التحكم بنجاح');
