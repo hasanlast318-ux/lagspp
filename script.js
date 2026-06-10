@@ -19,20 +19,28 @@ const REPORT_PAGE_HEARTBEAT_TIMEOUT = 9000;
 // متغيرات عامة
 let allUsers = [];
 let appUsers = [];
+let pageViewsData = [];
 let selectedUserId = null;
 let activeView = 'chat';
+let activeUsersPanel = 'selection';
 let selectedNotificationUserId = null;
+let selectedNotificationHistoryId = null;
 let currentMessages = [];
 let messageListener = null;
+let notificationHistoryListener = null;
 let currentTheme = 'light';
 let selectedAttachmentFile = null;
 let selectedAttachmentKind = null;
 let attachmentPreviewUrl = null;
 let isSendingMessage = false;
 let presenceRefreshTimer = null;
+let statusTooltipElement = null;
+let statusTooltipLongPressTimer = null;
 const selectedConversationIds = new Set();
 const selectedNotificationUserIds = new Set();
+const selectedNotificationHistoryIds = new Set();
 const resolvedAttachmentUrls = new Map();
+let notificationHistory = [];
 
 // عناصر DOM للتسجيل الدخول
 const loginContainer = document.getElementById('loginContainer');
@@ -59,6 +67,8 @@ const searchInput = document.getElementById('searchInput');
 const usersCountSpan = document.getElementById('usersCount');
 const totalTicketsSpan = document.getElementById('totalTickets');
 const messagesEnd = document.getElementById('messagesEnd');
+const userStatusToggle = document.getElementById('userStatusToggle');
+const userStatusPopover = document.getElementById('userStatusPopover');
 const showInfoBtn = document.getElementById('showInfoBtn');
 const infoPanel = document.getElementById('infoPanel');
 const closeInfoBtn = document.getElementById('closeInfoBtn');
@@ -84,10 +94,32 @@ const mediaViewerCloseBtn = document.getElementById('mediaViewerCloseBtn');
 const mediaViewerBackdrop = document.getElementById('mediaViewerBackdrop');
 const chatViewBtn = document.getElementById('chatViewBtn');
 const usersViewBtn = document.getElementById('usersViewBtn');
+const dashboardViewBtn = document.getElementById('dashboardViewBtn');
 const usersPage = document.getElementById('usersPage');
+const dashboardPage = document.getElementById('dashboardPage');
 const usersTableList = document.getElementById('usersTableList');
 const usersSearchInput = document.getElementById('usersSearchInput');
 const usersPresenceFilter = document.getElementById('usersPresenceFilter');
+const usersAppVersionFilter = document.getElementById('usersAppVersionFilter');
+const usersInactivityFilter = document.getElementById('usersInactivityFilter');
+const usersCustomInactivityWrap = document.getElementById('usersCustomInactivityWrap');
+const usersCustomInactivityValue = document.getElementById('usersCustomInactivityValue');
+const usersCustomInactivityUnit = document.getElementById('usersCustomInactivityUnit');
+const usersAdvancedFiltersBtn = document.getElementById('usersAdvancedFiltersBtn');
+const usersAdvancedFilters = document.getElementById('usersAdvancedFilters');
+const usersActiveFiltersCount = document.getElementById('usersActiveFiltersCount');
+const usersClearFiltersBtn = document.getElementById('usersClearFiltersBtn');
+const usersSelectionTabBtn = document.getElementById('usersSelectionTabBtn');
+const notificationsHistoryTabBtn = document.getElementById('notificationsHistoryTabBtn');
+const usersSelectionView = document.getElementById('usersSelectionView');
+const notificationsHistoryView = document.getElementById('notificationsHistoryView');
+const notificationsHistoryList = document.getElementById('notificationsHistoryList');
+const notificationHistoryDetails = document.getElementById('notificationHistoryDetails');
+const notificationsHistorySearchInput = document.getElementById('notificationsHistorySearchInput');
+const notificationsHistoryCount = document.getElementById('notificationsHistoryCount');
+const selectAllNotificationHistory = document.getElementById('selectAllNotificationHistory');
+const deleteSelectedNotificationsBtn = document.getElementById('deleteSelectedNotificationsBtn');
+const selectedNotificationsCount = document.getElementById('selectedNotificationsCount');
 const selectAllNotificationUsers = document.getElementById('selectAllNotificationUsers');
 const deleteSelectedUsersBtn = document.getElementById('deleteSelectedUsersBtn');
 const allUsersCount = document.getElementById('allUsersCount');
@@ -96,6 +128,7 @@ const selectedUserDetails = document.getElementById('selectedUserDetails');
 const notificationTitleInput = document.getElementById('notificationTitleInput');
 const notificationBodyInput = document.getElementById('notificationBodyInput');
 const notificationLinkInput = document.getElementById('notificationLinkInput');
+const notificationCustomLinkInput = document.getElementById('notificationCustomLinkInput');
 const sendNotificationBtn = document.getElementById('sendNotificationBtn');
 
 // عناصر الـ Modal المخصصة لتعديل الرسالة
@@ -265,6 +298,10 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function escapeAttribute(text) {
+    return escapeHtml(text).replace(/"/g, '&quot;');
 }
 
 function safeMediaUrl(url) {
@@ -756,6 +793,7 @@ function getPresenceState(user = {}) {
     const explicitOutOfChat = user.userInChat === false || user.inChat === false || user.user_in_chat === false || user.in_chat === false;
     const explicitInChat = user.userInChat === true || user.inChat === true || user.user_in_chat === true || user.in_chat === true || page.includes('report') || page.includes('بلاغ') || page.includes('problem');
     const explicitOnline = user.userOnline === true || user.online === true || user.active === true || user.isOnline === true || user.user_online === true || user.is_online === true || user.isActive === true;
+    const isStaleExplicitOnline = explicitOnline && lastActiveAt && now - lastActiveAt > ONLINE_HEARTBEAT_TIMEOUT;
     const locationText = getUserLocationText(user);
 
     if (explicitOffline) {
@@ -774,7 +812,7 @@ function getPresenceState(user = {}) {
         };
     }
 
-    if (isFreshOnline || explicitOnline) {
+    if (isFreshOnline || (explicitOnline && !isStaleExplicitOnline)) {
         return {
             className: 'active-app',
             text: locationText ? `متاح في التطبيق - ${locationText}` : 'متاح في التطبيق',
@@ -1134,6 +1172,11 @@ function setTheme(theme) {
             if (darkIcon) darkIcon.style.display = 'none';
         }
     }
+    // إرسال الثيم للـ iframe (لوحة الإحصائيات)
+    const iframe = document.getElementById('dashboardIframe');
+    if (iframe && iframe.contentWindow) {
+        try { iframe.contentWindow.postMessage({ type: 'SET_THEME', theme }, '*'); } catch(e) {}
+    }
 }
 
 function toggleTheme() {
@@ -1202,6 +1245,150 @@ function getUsageStats(user = {}) {
     };
 }
 
+function readUserValue(user = {}, keys = []) {
+    const sources = [user, user.presence, user.userPresence, user.statusInfo, user.deviceInfo, user.app, user.appInfo, user.analytics, user.activity, user.usageStats];
+    for (const source of sources) {
+        if (!source || typeof source !== 'object') continue;
+        for (const key of keys) {
+            const value = source[key];
+            if (value !== undefined && value !== null && String(value).trim() !== '') return value;
+        }
+    }
+    return '';
+}
+
+function getAppVersion(user = {}) {
+    return String(readUserValue(user, [
+        'appVersion',
+        'app_version',
+        'applicationVersion',
+        'application_version',
+        'version',
+        'buildVersion',
+        'build_version',
+        'buildNumber',
+        'build_number',
+        'clientVersion',
+        'client_version',
+        'appBuild',
+        'app_build'
+    ]) || '').trim();
+}
+
+function getLastActivityAt(user = {}) {
+    const keys = [
+        'presenceUpdatedAt',
+        'lastSeen',
+        'lastSeenAt',
+        'userLastSeen',
+        'userLastActiveAt',
+        'lastActive',
+        'lastActiveAt',
+        'lastLoginAt',
+        'lastLogin',
+        'lastUsedAt',
+        'lastUseAt',
+        'lastUsageAt',
+        'lastAppOpenAt',
+        'lastOpenedAt',
+        'lastVisitAt',
+        'lastVisitedAt',
+        'lastOnlineAt',
+        'lastConnectionAt',
+        'lastConnectedAt',
+        'lastSeenTime',
+        'lastActiveTime',
+        'lastUsedTime',
+        'lastActivityTime',
+        'activeAt',
+        'seenAt',
+        'heartbeatAt',
+        'lastHeartbeatAt',
+        'lastMessageTime',
+        'timestamp',
+        'updatedAt'
+    ];
+
+    return Math.max(...keys.map(key => toMillis(readUserValue(user, [key]))), 0);
+}
+
+function formatInactiveSince(timestamp) {
+    if (!timestamp) return 'غير متوفر';
+
+    const diff = Math.max(0, Date.now() - timestamp);
+    const days = Math.floor(diff / 86400000);
+    if (days <= 0) return 'اليوم';
+    if (days === 1) return 'منذ يوم';
+    if (days === 2) return 'منذ يومين';
+    if (days < 7) return `منذ ${days} أيام`;
+
+    const weeks = Math.floor(days / 7);
+    if (days < 30) return weeks === 1 ? 'منذ أسبوع' : `منذ ${weeks} أسابيع`;
+
+    const months = Math.floor(days / 30);
+    return months === 1 ? 'منذ شهر' : `منذ ${months} أشهر`;
+}
+
+function getCustomInactivityRangeDays() {
+    const value = Math.max(1, Number(usersCustomInactivityValue?.value || 1));
+    const unit = usersCustomInactivityUnit ? usersCustomInactivityUnit.value : 'days';
+    if (unit === 'weeks') return { min: value * 7, max: (value + 1) * 7 };
+    if (unit === 'months') return { min: value * 30, max: (value + 1) * 30 };
+    return { min: value, max: value + 1 };
+}
+
+function getInactivityFilterRangeDays() {
+    const value = usersInactivityFilter ? usersInactivityFilter.value : 'all';
+    if (value === 'custom') return getCustomInactivityRangeDays();
+    if (value === '1') return { min: 1, max: 2 };
+    if (value === '2') return { min: 2, max: 3 };
+    if (value === '7') return { min: 7, max: 14 };
+    if (value === '30') return { min: 30, max: 60 };
+    const days = Number(value);
+    return Number.isFinite(days) && days > 0 ? { min: days, max: days + 1 } : null;
+}
+
+function updateCustomInactivityVisibility() {
+    if (!usersCustomInactivityWrap || !usersInactivityFilter) return;
+    usersCustomInactivityWrap.classList.toggle('hidden', usersInactivityFilter.value !== 'custom');
+}
+
+function getActiveNotificationFiltersCount() {
+    let count = 0;
+    if (usersPresenceFilter && usersPresenceFilter.value !== 'all') count += 1;
+    if (usersAppVersionFilter && usersAppVersionFilter.value !== 'all') count += 1;
+    if (usersInactivityFilter && usersInactivityFilter.value !== 'all') count += 1;
+    return count;
+}
+
+function updateAdvancedFiltersUI() {
+    const count = getActiveNotificationFiltersCount();
+    if (usersAdvancedFiltersBtn) {
+        usersAdvancedFiltersBtn.classList.toggle('active', count > 0);
+        usersAdvancedFiltersBtn.setAttribute('aria-expanded', usersAdvancedFilters && !usersAdvancedFilters.classList.contains('hidden') ? 'true' : 'false');
+    }
+    if (usersActiveFiltersCount) {
+        usersActiveFiltersCount.textContent = count ? String(count) : '';
+        usersActiveFiltersCount.style.display = count ? 'inline-flex' : 'none';
+    }
+    if (usersClearFiltersBtn) usersClearFiltersBtn.disabled = count === 0;
+}
+
+function toggleAdvancedFilters() {
+    if (!usersAdvancedFilters) return;
+    usersAdvancedFilters.classList.toggle('hidden');
+    updateAdvancedFiltersUI();
+}
+
+function resetNotificationFilters() {
+    if (usersPresenceFilter) usersPresenceFilter.value = 'all';
+    if (usersAppVersionFilter) usersAppVersionFilter.value = 'all';
+    if (usersInactivityFilter) usersInactivityFilter.value = 'all';
+    if (usersCustomInactivityValue) usersCustomInactivityValue.value = '1';
+    if (usersCustomInactivityUnit) usersCustomInactivityUnit.value = 'days';
+    renderNotificationUsers();
+}
+
 function formatUsage(minutes) {
     if (!minutes) return 'غير متوفر';
     if (minutes < 60) return `${Math.round(minutes)} د`;
@@ -1227,30 +1414,145 @@ function buildNotificationUsers() {
     });
 }
 
+function syncAppVersionFilterOptions(users = buildNotificationUsers()) {
+    if (!usersAppVersionFilter) return;
+
+    const currentValue = usersAppVersionFilter.value || 'all';
+    const versions = [...new Set(users.map(getAppVersion).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+    usersAppVersionFilter.innerHTML = [
+        '<option value="all">كل الإصدارات</option>',
+        '<option value="unknown">بدون إصدار</option>',
+        ...versions.map(version => `<option value="${escapeAttribute(version)}">${escapeHtml(version)}</option>`)
+    ].join('');
+
+    usersAppVersionFilter.value = [...versions, 'all', 'unknown'].includes(currentValue) ? currentValue : 'all';
+}
+
 function getFilteredNotificationUsers() {
     const search = usersSearchInput ? usersSearchInput.value.trim().toLowerCase() : '';
     const presenceFilter = usersPresenceFilter ? usersPresenceFilter.value : 'all';
+    const appVersionFilter = usersAppVersionFilter ? usersAppVersionFilter.value : 'all';
+    const inactivityFilter = usersInactivityFilter ? usersInactivityFilter.value : 'all';
+    const inactivityRangeDays = getInactivityFilterRangeDays();
+
     return buildNotificationUsers().filter(user => {
-        const text = `${getDisplayName(user)} ${getUserEmail(user)} ${getUserKey(user)}`.toLowerCase();
+        const appVersion = getAppVersion(user);
+        const lastActivityAt = getLastActivityAt(user);
+        const inactiveDays = lastActivityAt ? (Date.now() - lastActivityAt) / 86400000 : 0;
+        const text = `${getDisplayName(user)} ${getUserEmail(user)} ${getUserKey(user)} ${appVersion}`.toLowerCase();
         const presence = getPresenceState(user);
         const matchesPresence =
             presenceFilter === 'all' ||
             (presenceFilter === 'online' && presence.className !== 'offline') ||
             (presenceFilter === 'offline' && presence.className === 'offline');
-        return text.includes(search) && matchesPresence;
+        const matchesVersion =
+            appVersionFilter === 'all' ||
+            (appVersionFilter === 'unknown' && !appVersion) ||
+            appVersion === appVersionFilter;
+        const matchesInactivity =
+            inactivityFilter === 'all' ||
+            (inactivityFilter === 'never' && !lastActivityAt) ||
+            (inactivityRangeDays && lastActivityAt > 0 && inactiveDays >= inactivityRangeDays.min && inactiveDays < inactivityRangeDays.max);
+
+        return text.includes(search) && matchesPresence && matchesVersion && matchesInactivity;
     });
 }
 
 function setActiveView(view) {
     activeView = view;
     const isUsers = view === 'users';
+    const isDashboard = view === 'dashboard';
 
     if (usersPage) usersPage.style.display = isUsers ? 'flex' : 'none';
+    if (dashboardPage) {
+        dashboardPage.style.display = isDashboard ? 'flex' : 'none';
+        if (isDashboard) {
+            const iframe = document.getElementById('dashboardIframe');
+            if (iframe) {
+                // تحميل الـ iframe مرة واحدة فقط عند أول فتح
+                const currentSrc = iframe.getAttribute('data-loaded');
+                if (!currentSrc) {
+                    // إضافة cache-busting timestamp لمنع ظهور نسخة قديمة من الـ iframe
+                    const cacheBuster = Date.now();
+                    iframe.src = `dashboard/dashboard.html?v=${cacheBuster}`;
+                    iframe.setAttribute('data-loaded', 'true');
+                    // إرسال البيانات والثيم بعد تحميل الـ iframe
+                    iframe.addEventListener('load', () => {
+                        sendDataToDashboard();
+                        // إرسال الثيم الحالي للـ iframe بعد التحميل
+                        try { iframe.contentWindow.postMessage({ type: 'SET_THEME', theme: currentTheme || localStorage.getItem('theme') || 'light' }, '*'); } catch(e) {}
+                    }, { once: true });
+                } else {
+                    // الـ iframe محمل بالفعل، أرسل البيانات والثيم مباشرة
+                    sendDataToDashboard();
+                    try { iframe.contentWindow.postMessage({ type: 'SET_THEME', theme: currentTheme || localStorage.getItem('theme') || 'light' }, '*'); } catch(e) {}
+                }
+            }
+        }
+    }
+    
     const chatMain = document.querySelector('.chat-main');
-    if (chatMain) chatMain.style.display = isUsers ? 'none' : 'flex';
-    if (chatViewBtn) chatViewBtn.classList.toggle('active', !isUsers);
-    if (usersViewBtn) usersViewBtn.classList.toggle('active', isUsers);
-    if (isUsers) renderNotificationUsers();
+    if (chatMain) chatMain.style.display = (isUsers || isDashboard) ? 'none' : 'flex';
+    
+    if (chatViewBtn) chatViewBtn.classList.toggle('active', view === 'chat');
+    if (usersViewBtn) usersViewBtn.classList.toggle('active', view === 'users');
+    if (dashboardViewBtn) dashboardViewBtn.classList.toggle('active', view === 'dashboard');
+    
+    if (isUsers) {
+        if (activeUsersPanel === 'history') renderNotificationHistory();
+        else renderNotificationUsers();
+    }
+}
+
+// إرسال بيانات Firebase الحقيقية للـ iframe عبر postMessage
+function sendDataToDashboard() {
+    const iframe = document.getElementById('dashboardIframe');
+    if (!iframe || !iframe.contentWindow) return;
+    
+    try {
+        // تحويل بيانات المستخدمين لشكل قابل للإرسال (JSON-safe)
+        const usersData = allUsers.map(u => {
+            const obj = {};
+            Object.keys(u).forEach(k => {
+                const v = u[k];
+                if (v && typeof v === 'object' && typeof v.toMillis === 'function') {
+                    obj[k] = { _type: 'timestamp', millis: v.toMillis() };
+                } else if (v && typeof v === 'object' && v.seconds !== undefined && v.nanoseconds !== undefined) {
+                    obj[k] = { _type: 'timestamp', millis: v.seconds * 1000 };
+                } else if (typeof v !== 'function') {
+                    obj[k] = v;
+                }
+            });
+            return obj;
+        });
+        
+        const appUsersData = appUsers.map(u => {
+            const obj = {};
+            Object.keys(u).forEach(k => {
+                const v = u[k];
+                if (v && typeof v === 'object' && typeof v.toMillis === 'function') {
+                    obj[k] = { _type: 'timestamp', millis: v.toMillis() };
+                } else if (v && typeof v === 'object' && v.seconds !== undefined && v.nanoseconds !== undefined) {
+                    obj[k] = { _type: 'timestamp', millis: v.seconds * 1000 };
+                } else if (typeof v !== 'function') {
+                    obj[k] = v;
+                }
+            });
+            return obj;
+        });
+        
+        iframe.contentWindow.postMessage({
+            type: 'FIREBASE_DATA',
+            users: appUsersData,
+            reports: usersData
+        }, '*');
+        
+        console.log('📤 تم إرسال البيانات للوحة الإحصائيات:', appUsersData.length, 'مستخدم،', usersData.length, 'تقرير');
+    } catch (err) {
+        console.warn('تعذر إرسال البيانات للـ iframe:', err);
+    }
 }
 
 function loadUsers() {
@@ -1285,6 +1587,8 @@ function loadUsers() {
         
         renderUsersList();
         if (activeView === 'users') renderNotificationUsers();
+        // إرسال البيانات المحدّثة للوحة الإحصائيات إذا كانت مفتوحة
+        if (activeView === 'dashboard') sendDataToDashboard();
         
         if (allUsers.length === 0) {
             console.warn('⚠️ لا توجد بيانات في قاعدة البيانات بعد!');
@@ -1313,9 +1617,354 @@ function loadAppUsers() {
         });
 
         if (activeView === 'users') renderNotificationUsers();
+        // إرسال البيانات المحدّثة للوحة الإحصائيات إذا كانت مفتوحة
+        if (activeView === 'dashboard') sendDataToDashboard();
     }, (error) => {
         console.warn('تعذر تحميل مجموعة users، سيتم الاعتماد على بيانات البلاغات فقط:', error);
     });
+}
+
+function loadPageViews() {
+    const q = query(collection(db, 'pageViews'));
+
+    onSnapshot(q, (snapshot) => {
+        pageViewsData = [];
+        snapshot.forEach(docSnap => {
+            pageViewsData.push({
+                id: docSnap.id,
+                ...docSnap.data()
+            });
+        });
+        // إرسال البيانات المحدّثة للوحة الإحصائيات إذا كانت مفتوحة
+        if (activeView === 'dashboard') sendDataToDashboard();
+    }, (error) => {
+        console.warn('تعذر تحميل مجموعة pageViews:', error);
+    });
+}
+
+function loadNotificationHistory(useFallback = false) {
+    if (notificationHistoryListener) notificationHistoryListener();
+
+    const requestsRef = collection(db, NOTIFICATION_REQUESTS_COLLECTION);
+    const q = useFallback
+        ? query(requestsRef)
+        : query(requestsRef, orderBy('createdAt', 'desc'), limit(80));
+
+    notificationHistoryListener = onSnapshot(q, (snapshot) => {
+        notificationHistory = [];
+        snapshot.forEach(requestDoc => {
+            notificationHistory.push({
+                id: requestDoc.id,
+                ...requestDoc.data()
+            });
+        });
+
+        notificationHistory.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
+        selectedNotificationHistoryIds.forEach(id => {
+            if (!notificationHistory.some(item => item.id === id)) selectedNotificationHistoryIds.delete(id);
+        });
+        if (!notificationHistory.some(item => item.id === selectedNotificationHistoryId)) {
+            selectedNotificationHistoryId = notificationHistory[0]?.id || null;
+        }
+
+        renderNotificationHistory();
+    }, (error) => {
+        console.warn('تعذر تحميل سجل الإشعارات:', error);
+        if (!useFallback) {
+            loadNotificationHistory(true);
+            return;
+        }
+        if (notificationsHistoryList) {
+            notificationsHistoryList.innerHTML = '<div class="users-empty-new">تعذر تحميل سجل الإشعارات</div>';
+        }
+    });
+}
+
+function setUsersPanel(panel) {
+    activeUsersPanel = panel;
+    const isHistory = panel === 'history';
+
+    if (usersSelectionView) usersSelectionView.style.display = isHistory ? 'none' : 'grid';
+    if (notificationsHistoryView) notificationsHistoryView.style.display = isHistory ? 'grid' : 'none';
+    if (usersSelectionTabBtn) usersSelectionTabBtn.classList.toggle('active', !isHistory);
+    if (notificationsHistoryTabBtn) notificationsHistoryTabBtn.classList.toggle('active', isHistory);
+
+    if (isHistory) renderNotificationHistory();
+    else renderNotificationUsers();
+}
+
+function getNotificationRecipients(notification = {}) {
+    const recipients = Array.isArray(notification.recipients) ? notification.recipients : [];
+    return recipients
+        .map(recipient => typeof recipient === 'string' ? { userKey: recipient } : recipient)
+        .filter(recipient => recipient && (recipient.userKey || recipient.userId || recipient.email || recipient.name));
+}
+
+function getRecipientKey(recipient = {}) {
+    return String(recipient.userKey || recipient.userId || recipient.uid || recipient.email || '').trim();
+}
+
+function getRecipientTokensCount(recipient = {}) {
+    if (Array.isArray(recipient.tokens)) return recipient.tokens.length;
+    if (recipient.tokens && typeof recipient.tokens === 'object') return Object.values(recipient.tokens).filter(Boolean).length;
+    if (typeof recipient.tokens === 'string' && recipient.tokens.trim()) return 1;
+    return 0;
+}
+
+function getNotificationSearchText(notification = {}) {
+    const recipientsText = getNotificationRecipients(notification)
+        .map(recipient => `${recipient.name || ''} ${recipient.email || ''} ${getRecipientKey(recipient)}`)
+        .join(' ');
+    return `${notification.title || ''} ${notification.body || ''} ${notification.link || ''} ${notification.createdBy || ''} ${recipientsText}`.toLowerCase();
+}
+
+function getFilteredNotificationHistory() {
+    const search = notificationsHistorySearchInput ? notificationsHistorySearchInput.value.trim().toLowerCase() : '';
+    return notificationHistory.filter(item => getNotificationSearchText(item).includes(search));
+}
+
+function formatNotificationDate(value) {
+    const timestamp = toMillis(value);
+    if (!timestamp) return 'وقت غير متوفر';
+    return new Date(timestamp).toLocaleString('ar-SA', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+function getNotificationStatusText(status = '') {
+    const value = String(status || '').toLowerCase();
+    if (value === 'sent' || value === 'done' || value === 'completed') return 'تم الإرسال';
+    if (value === 'failed' || value === 'error') return 'فشل';
+    if (value === 'processing') return 'قيد المعالجة';
+    return 'بانتظار الإرسال';
+}
+
+function safeNotificationHref(link = '') {
+    const value = String(link || '').trim();
+    if (!value) return '';
+    if (/^https?:\/\//i.test(value) || value.startsWith('/')) return value;
+    return '';
+}
+
+function renderNotificationHistory() {
+    if (notificationsHistoryCount) notificationsHistoryCount.textContent = notificationHistory.length;
+    if (!notificationsHistoryList) {
+        renderNotificationHistoryDetails();
+        return;
+    }
+
+    const history = getFilteredNotificationHistory();
+    if (history.length === 0) {
+        notificationsHistoryList.innerHTML = '<div class="users-empty-new">لا توجد إشعارات مطابقة</div>';
+        updateNotificationHistorySelectionUI(history);
+        if (notificationHistoryDetails) {
+            notificationHistoryDetails.innerHTML = '<div class="empty-user-details-new">لا توجد تفاصيل لعرضها مع البحث الحالي.</div>';
+        }
+        return;
+    }
+
+    if (!history.some(item => item.id === selectedNotificationHistoryId)) {
+        selectedNotificationHistoryId = history[0]?.id || null;
+    }
+
+    notificationsHistoryList.innerHTML = history.map(item => {
+        const recipients = getNotificationRecipients(item);
+        const createdAt = formatNotificationDate(item.createdAt);
+        const statusText = getNotificationStatusText(item.status);
+        const checked = selectedNotificationHistoryIds.has(item.id);
+        return `
+            <div class="notification-history-card-new ${selectedNotificationHistoryId === item.id ? 'active' : ''} ${checked ? 'selected' : ''}" data-notification-id="${escapeAttribute(item.id)}">
+                <label class="notification-history-check-new" title="تحديد الإشعار">
+                    <input type="checkbox" class="notification-history-checkbox-new" data-notification-id="${escapeAttribute(item.id)}" ${checked ? 'checked' : ''}>
+                </label>
+                <div class="notification-history-card-content-new">
+                    <div class="notification-history-card-head-new">
+                        <strong>${escapeHtml(item.title || 'إشعار بدون عنوان')}</strong>
+                        <span>${escapeHtml(statusText)}</span>
+                    </div>
+                    <p>${escapeHtml(item.body || 'لا يوجد نص محفوظ لهذا الإشعار')}</p>
+                    <div class="notification-history-meta-new">
+                        <span>${escapeHtml(createdAt)}</span>
+                        <span>${recipients.length} مستلم</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    updateNotificationHistorySelectionUI(history);
+
+    document.querySelectorAll('.notification-history-card-new').forEach(card => {
+        card.addEventListener('click', () => {
+            selectedNotificationHistoryId = card.dataset.notificationId;
+            renderNotificationHistory();
+        });
+    });
+
+    document.querySelectorAll('.notification-history-checkbox-new').forEach(checkbox => {
+        checkbox.addEventListener('click', event => event.stopPropagation());
+        checkbox.addEventListener('change', () => {
+            if (checkbox.checked) selectedNotificationHistoryIds.add(checkbox.dataset.notificationId);
+            else selectedNotificationHistoryIds.delete(checkbox.dataset.notificationId);
+            renderNotificationHistory();
+        });
+    });
+
+    document.querySelectorAll('.notification-history-check-new').forEach(label => {
+        label.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const checkbox = label.querySelector('.notification-history-checkbox-new');
+            if (!checkbox) return;
+            const id = checkbox.dataset.notificationId;
+            if (selectedNotificationHistoryIds.has(id)) selectedNotificationHistoryIds.delete(id);
+            else selectedNotificationHistoryIds.add(id);
+            renderNotificationHistory();
+        });
+    });
+
+    renderNotificationHistoryDetails();
+}
+
+function updateNotificationHistorySelectionUI(visibleHistory = null) {
+    const visible = visibleHistory || getFilteredNotificationHistory();
+    const visibleIds = visible.map(item => item.id);
+    const selectedVisible = visibleIds.filter(id => selectedNotificationHistoryIds.has(id)).length;
+
+    if (selectedNotificationsCount) selectedNotificationsCount.textContent = selectedNotificationHistoryIds.size;
+    if (deleteSelectedNotificationsBtn) deleteSelectedNotificationsBtn.disabled = selectedNotificationHistoryIds.size === 0;
+    if (selectAllNotificationHistory) {
+        selectAllNotificationHistory.checked = visibleIds.length > 0 && selectedVisible === visibleIds.length;
+        selectAllNotificationHistory.indeterminate = selectedVisible > 0 && selectedVisible < visibleIds.length;
+    }
+}
+
+function toggleSelectAllNotificationHistory() {
+    const visible = getFilteredNotificationHistory();
+    const shouldSelect = selectAllNotificationHistory ? selectAllNotificationHistory.checked : false;
+
+    visible.forEach(item => {
+        if (shouldSelect) selectedNotificationHistoryIds.add(item.id);
+        else selectedNotificationHistoryIds.delete(item.id);
+    });
+
+    renderNotificationHistory();
+}
+
+async function deleteSelectedNotifications() {
+    const ids = [...selectedNotificationHistoryIds].filter(id => notificationHistory.some(item => item.id === id));
+    await deleteNotificationsByIds(ids);
+}
+
+async function deleteNotificationsByIds(ids = []) {
+    ids = [...new Set(ids)].filter(id => notificationHistory.some(item => item.id === id));
+    if (ids.length === 0) return;
+
+    const confirmed = confirm(`هل تريد حذف ${ids.length} إشعار نهائياً من سجل الإشعارات؟ لا يمكن التراجع عن هذا الإجراء.`);
+    if (!confirmed) return;
+
+    try {
+        if (deleteSelectedNotificationsBtn) deleteSelectedNotificationsBtn.disabled = true;
+        await Promise.all(ids.map(id => deleteDoc(doc(db, NOTIFICATION_REQUESTS_COLLECTION, id))));
+
+        ids.forEach(id => selectedNotificationHistoryIds.delete(id));
+        if (selectedNotificationHistoryId && ids.includes(selectedNotificationHistoryId)) {
+            selectedNotificationHistoryId = notificationHistory.find(item => !ids.includes(item.id))?.id || null;
+        }
+
+        notificationHistory = notificationHistory.filter(item => !ids.includes(item.id));
+        renderNotificationHistory();
+        showToast(`تم حذف ${ids.length} إشعار`);
+    } catch (error) {
+        console.error('خطأ في حذف الإشعارات:', error);
+        showToast('فشل حذف بعض الإشعارات', true);
+    } finally {
+        updateNotificationHistorySelectionUI();
+    }
+}
+
+function renderNotificationHistoryDetails() {
+    if (!notificationHistoryDetails) return;
+
+    const item = notificationHistory.find(notification => notification.id === selectedNotificationHistoryId);
+    if (!item) {
+        notificationHistoryDetails.innerHTML = '<div class="empty-user-details-new">اختر إشعارًا لعرض مستلميه وتفاصيله.</div>';
+        return;
+    }
+
+    const recipients = getNotificationRecipients(item);
+    const safeLink = safeNotificationHref(item.link);
+    const recipientRows = recipients.length
+        ? recipients.map(recipient => {
+            const key = getRecipientKey(recipient);
+            return `
+                <div class="notification-recipient-row-new">
+                    <div>
+                        <strong>${escapeHtml(recipient.name || key || 'مستخدم')}</strong>
+                        <span>${escapeHtml(recipient.email || key || 'لا يوجد معرف')}</span>
+                    </div>
+                    <small>${getRecipientTokensCount(recipient)} رمز</small>
+                </div>
+            `;
+        }).join('')
+        : '<div class="users-empty-new">لا توجد قائمة مستلمين محفوظة لهذا الإشعار</div>';
+
+    notificationHistoryDetails.innerHTML = `
+        <div class="notification-history-detail-head-new">
+            <span>${escapeHtml(getNotificationStatusText(item.status))}</span>
+            <h3>${escapeHtml(item.title || 'إشعار بدون عنوان')}</h3>
+            <p>${escapeHtml(formatNotificationDate(item.createdAt))}</p>
+        </div>
+        <div class="notification-history-body-new">${escapeHtml(item.body || 'لا يوجد نص محفوظ لهذا الإشعار')}</div>
+        ${item.link ? (safeLink ? `<a class="notification-history-link-new" href="${escapeAttribute(safeLink)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.link)}</a>` : `<div class="notification-history-link-new">${escapeHtml(item.link)}</div>`) : ''}
+        <div class="notification-history-actions-new">
+            <button type="button" data-history-action="add" data-notification-id="${escapeAttribute(item.id)}">إضافة المستلمين للتحديد</button>
+            <button type="button" data-history-action="exclude" data-notification-id="${escapeAttribute(item.id)}">استثناء المستلمين</button>
+            <button type="button" data-history-action="replace" data-notification-id="${escapeAttribute(item.id)}">تحديدهم فقط</button>
+            <button type="button" class="danger" data-history-action="delete" data-notification-id="${escapeAttribute(item.id)}">حذف هذا الإشعار نهائياً</button>
+        </div>
+        <div class="notification-recipients-head-new">
+            <strong>المستلمون</strong>
+            <span>${recipients.length}</span>
+        </div>
+        <div class="notification-recipients-list-new">${recipientRows}</div>
+    `;
+
+    notificationHistoryDetails.querySelectorAll('[data-history-action]').forEach(button => {
+        button.addEventListener('click', () => {
+            if (button.dataset.historyAction === 'delete') {
+                deleteNotificationsByIds([button.dataset.notificationId]);
+                return;
+            }
+            applyNotificationHistorySelection(button.dataset.notificationId, button.dataset.historyAction);
+        });
+    });
+}
+
+function applyNotificationHistorySelection(notificationId, action) {
+    const item = notificationHistory.find(notification => notification.id === notificationId);
+    if (!item) return;
+
+    const keys = getNotificationRecipients(item).map(getRecipientKey).filter(Boolean);
+    if (keys.length === 0) {
+        showToast('لا توجد مستلمين محفوظين لهذا الإشعار', true);
+        return;
+    }
+
+    if (action === 'replace') selectedNotificationUserIds.clear();
+    keys.forEach(key => {
+        if (action === 'exclude') selectedNotificationUserIds.delete(key);
+        else selectedNotificationUserIds.add(key);
+    });
+
+    renderNotificationUsers();
+    updateNotificationSelectionUI();
+    const actionText = action === 'exclude' ? 'استثناء' : (action === 'replace' ? 'تحديد' : 'إضافة');
+    showToast(`تم ${actionText} ${keys.length} مستلم`);
 }
 
 function renderUsersList() {
@@ -1455,6 +2104,10 @@ function updateNotificationSelectionUI(users = null) {
 function renderNotificationUsers() {
     if (!usersTableList) return;
 
+    syncAppVersionFilterOptions();
+    updateCustomInactivityVisibility();
+    updateAdvancedFiltersUI();
+
     const users = getFilteredNotificationUsers();
     if (users.length === 0) {
         usersTableList.innerHTML = '<div class="users-empty-new">لا توجد بيانات مستخدمين بعد</div>';
@@ -1466,13 +2119,15 @@ function renderNotificationUsers() {
         const key = getUserKey(user);
         const usage = getUsageStats(user);
         const presence = getPresenceState(user);
+        const appVersion = getAppVersion(user);
+        const lastActivityAt = getLastActivityAt(user);
         const checked = selectedNotificationUserIds.has(key);
         const tokensCount = getFcmTokens(user).length;
 
         return `
-            <div class="user-row-new ${selectedNotificationUserId === key ? 'active' : ''}" data-user-key="${escapeHtml(key)}">
+            <div class="user-row-new ${selectedNotificationUserId === key ? 'active' : ''}" data-user-key="${escapeAttribute(key)}">
                 <label class="user-row-check-new">
-                    <input type="checkbox" class="notification-user-checkbox" data-user-key="${escapeHtml(key)}" ${checked ? 'checked' : ''}>
+                    <input type="checkbox" class="notification-user-checkbox" data-user-key="${escapeAttribute(key)}" ${checked ? 'checked' : ''}>
                 </label>
                 <div class="user-row-profile-new">
                     <div class="user-row-avatar-new">${renderUserAvatar(user, getDisplayName(user))}</div>
@@ -1484,7 +2139,9 @@ function renderNotificationUsers() {
                 <div class="usage-pill-new" data-label="اليومي">${formatUsage(usage.daily)}</div>
                 <div class="usage-pill-new" data-label="الأسبوعي">${formatUsage(usage.weekly)}</div>
                 <div class="usage-pill-new" data-label="الشهري">${formatUsage(usage.monthly)}</div>
-                <div class="user-status-pill-new ${presence.className}" data-label="الحالة" title="${escapeHtml(tokensCount ? `${tokensCount} رمز إشعار` : 'لا يوجد رمز إشعار محفوظ')}">${escapeHtml(presence.text)}</div>
+                <div class="usage-pill-new" data-label="الإصدار">${escapeHtml(appVersion || 'غير متوفر')}</div>
+                <div class="usage-pill-new" data-label="آخر استخدام" title="${lastActivityAt ? escapeHtml(new Date(lastActivityAt).toLocaleString('ar-SA')) : ''}">${formatInactiveSince(lastActivityAt)}</div>
+                <div class="user-status-pill-new ${presence.className} status-tooltip-target" data-label="الحالة" data-full-status="${escapeAttribute(presence.text)}" aria-label="${escapeAttribute(presence.text)}">${escapeHtml(presence.text)}</div>
             </div>
         `;
     }).join('');
@@ -1536,6 +2193,8 @@ function renderSelectedUserDetails() {
 
     const usage = getUsageStats(user);
     const tokens = getFcmTokens(user);
+    const appVersion = getAppVersion(user);
+    const lastActivityAt = getLastActivityAt(user);
     const detailRows = [
         ['الاسم', getDisplayName(user)],
         ['البريد', getUserEmail(user)],
@@ -1543,7 +2202,8 @@ function renderSelectedUserDetails() {
         ['رقم آخر بلاغ', user.reportId],
         ['الجهاز', user.device],
         ['الصفحة الحالية', getUserLocationText(user)],
-        ['إصدار التطبيق', user.appVersion],
+        ['إصدار التطبيق', appVersion],
+        ['آخر استخدام', lastActivityAt ? `${formatInactiveSince(lastActivityAt)} - ${new Date(lastActivityAt).toLocaleString('ar-SA')}` : 'غير متوفر'],
         ['رموز FCM', tokens.length ? `${tokens.length} محفوظ` : 'غير متوفر'],
         ['متوسط يومي', formatUsage(usage.daily)],
         ['متوسط أسبوعي', formatUsage(usage.weekly)],
@@ -1650,7 +2310,17 @@ function toggleSelectAllNotificationUsers() {
 async function sendNotificationRequest() {
     const title = notificationTitleInput ? notificationTitleInput.value.trim() : '';
     const body = notificationBodyInput ? notificationBodyInput.value.trim() : '';
-    const link = notificationLinkInput ? notificationLinkInput.value.trim() : '';
+    
+    let link = '';
+    if (notificationLinkInput) {
+        const val = notificationLinkInput.value.trim();
+        if (val === 'custom_path') {
+            link = notificationCustomLinkInput ? notificationCustomLinkInput.value.trim() : '';
+        } else {
+            link = val;
+        }
+    }
+
     const recipients = buildNotificationUsers().filter(user => selectedNotificationUserIds.has(getUserKey(user)));
 
     if (!title || !body || recipients.length === 0) {
@@ -1667,6 +2337,7 @@ async function sendNotificationRequest() {
             status: 'pending',
             createdAt: Date.now(),
             createdBy: auth?.currentUser?.email || '',
+            recipientCount: recipients.length,
             recipients: recipients.map(user => ({
                 userKey: getUserKey(user),
                 userId: user.userId || user.uid || '',
@@ -1679,7 +2350,13 @@ async function sendNotificationRequest() {
         showToast(`تم إنشاء طلب إشعار لـ ${recipients.length} مستخدم`);
         if (notificationTitleInput) notificationTitleInput.value = '';
         if (notificationBodyInput) notificationBodyInput.value = '';
-        if (notificationLinkInput) notificationLinkInput.value = '';
+        if (notificationLinkInput) {
+            notificationLinkInput.value = '';
+            if (notificationCustomLinkInput) {
+                notificationCustomLinkInput.value = '';
+                notificationCustomLinkInput.style.display = 'none';
+            }
+        }
     } catch (error) {
         console.error('خطأ في إنشاء طلب الإشعار:', error);
         showToast('فشل إنشاء طلب الإشعار', true);
@@ -1715,12 +2392,109 @@ function updateUserPresenceUI(user) {
         userStatusDot.classList.add(presence.className);
         userStatusElem.textContent = presence.text;
         userStatusElem.style.color = presence.color;
+        userStatusElem.title = presence.text;
+        if (userStatusToggle) {
+            userStatusToggle.setAttribute('aria-label', `حالة المستخدم: ${presence.text}`);
+            userStatusToggle.dataset.fullStatus = presence.text;
+        }
+        if (statusTooltipElement && statusTooltipElement.classList.contains('show')) {
+            statusTooltipElement.textContent = presence.text;
+        }
+    }
+}
+
+function getStatusTooltipElement() {
+    if (!statusTooltipElement) {
+        statusTooltipElement = document.createElement('div');
+        statusTooltipElement.className = 'status-tooltip-new';
+        document.body.appendChild(statusTooltipElement);
+    }
+    return statusTooltipElement;
+}
+
+function positionStatusTooltip(target, tooltip) {
+    const rect = target.getBoundingClientRect();
+    const spacing = 8;
+    tooltip.style.left = '0px';
+    tooltip.style.top = '0px';
+    tooltip.classList.add('show');
+
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const maxLeft = window.innerWidth - tooltipRect.width - 8;
+    const centeredLeft = rect.left + (rect.width / 2) - (tooltipRect.width / 2);
+    const left = Math.max(8, Math.min(centeredLeft, maxLeft));
+    const topAbove = rect.top - tooltipRect.height - spacing;
+    const topBelow = rect.bottom + spacing;
+    const top = topAbove >= 8 ? topAbove : Math.min(topBelow, window.innerHeight - tooltipRect.height - 8);
+
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+}
+
+function showStatusTooltip(target) {
+    if (!target) return;
+    const text = target.dataset.fullStatus || target.getAttribute('aria-label') || target.getAttribute('title') || target.textContent || '';
+    if (!text.trim()) return;
+
+    const tooltip = getStatusTooltipElement();
+    tooltip.textContent = text.trim();
+    positionStatusTooltip(target, tooltip);
+}
+
+function hideStatusTooltip() {
+    if (statusTooltipElement) statusTooltipElement.classList.remove('show');
+}
+
+function clearStatusTooltipLongPress() {
+    if (statusTooltipLongPressTimer) {
+        clearTimeout(statusTooltipLongPressTimer);
+        statusTooltipLongPressTimer = null;
+    }
+}
+
+function handleStatusTooltipPointerOver(event) {
+    const target = event.target.closest('.status-tooltip-target');
+    if (!target || event.pointerType === 'touch') return;
+    showStatusTooltip(target);
+}
+
+function handleStatusTooltipPointerOut(event) {
+    const target = event.target.closest('.status-tooltip-target');
+    if (!target || event.pointerType === 'touch') return;
+    if (event.relatedTarget && target.contains(event.relatedTarget)) return;
+    hideStatusTooltip();
+}
+
+function handleStatusTooltipPointerDown(event) {
+    const target = event.target.closest('.status-tooltip-target');
+    if (!target) {
+        hideStatusTooltip();
+        return;
+    }
+    if (event.pointerType !== 'touch') return;
+
+    clearStatusTooltipLongPress();
+    statusTooltipLongPressTimer = setTimeout(() => {
+        showStatusTooltip(target);
+        setTimeout(hideStatusTooltip, 3500);
+        statusTooltipLongPressTimer = null;
+    }, 1000);
+}
+
+function handleStatusTooltipPointerEnd() {
+    clearStatusTooltipLongPress();
+}
+
+function handleStatusTooltipContextMenu(event) {
+    if (event.target.closest('.status-tooltip-target')) {
+        event.preventDefault();
     }
 }
 
 async function selectUser(userId) {
     cancelEditMode();
     clearSelectedAttachment();
+    hideStatusTooltip();
     closeMobileSidebar();
     
     // Hide mobileTopBar when in chat on mobile
@@ -2542,13 +3316,47 @@ function initEventListeners() {
     }
     
     if (sendBtn) sendBtn.addEventListener('click', handleSendOrSave);
+    document.addEventListener('pointerover', handleStatusTooltipPointerOver);
+    document.addEventListener('pointerout', handleStatusTooltipPointerOut);
+    document.addEventListener('pointerdown', handleStatusTooltipPointerDown);
+    document.addEventListener('pointerup', handleStatusTooltipPointerEnd);
+    document.addEventListener('pointercancel', handleStatusTooltipPointerEnd);
+    document.addEventListener('scroll', hideStatusTooltip, true);
+    document.addEventListener('contextmenu', handleStatusTooltipContextMenu);
     if (chatViewBtn) chatViewBtn.addEventListener('click', () => setActiveView('chat'));
     if (usersViewBtn) usersViewBtn.addEventListener('click', () => setActiveView('users'));
+    if (dashboardViewBtn) dashboardViewBtn.addEventListener('click', () => setActiveView('dashboard'));
     if (usersSearchInput) usersSearchInput.addEventListener('input', renderNotificationUsers);
     if (usersPresenceFilter) usersPresenceFilter.addEventListener('change', renderNotificationUsers);
+    if (usersAppVersionFilter) usersAppVersionFilter.addEventListener('change', renderNotificationUsers);
+    if (usersInactivityFilter) usersInactivityFilter.addEventListener('change', renderNotificationUsers);
+    if (usersCustomInactivityValue) usersCustomInactivityValue.addEventListener('input', renderNotificationUsers);
+    if (usersCustomInactivityUnit) usersCustomInactivityUnit.addEventListener('change', renderNotificationUsers);
+    if (usersAdvancedFiltersBtn) usersAdvancedFiltersBtn.addEventListener('click', toggleAdvancedFilters);
+    if (usersClearFiltersBtn) usersClearFiltersBtn.addEventListener('click', resetNotificationFilters);
+    if (usersSelectionTabBtn) usersSelectionTabBtn.addEventListener('click', () => setUsersPanel('selection'));
+    if (notificationsHistoryTabBtn) notificationsHistoryTabBtn.addEventListener('click', () => setUsersPanel('history'));
+    if (notificationsHistorySearchInput) notificationsHistorySearchInput.addEventListener('input', renderNotificationHistory);
+    if (selectAllNotificationHistory) selectAllNotificationHistory.addEventListener('change', toggleSelectAllNotificationHistory);
+    if (deleteSelectedNotificationsBtn) deleteSelectedNotificationsBtn.addEventListener('click', deleteSelectedNotifications);
     if (selectAllNotificationUsers) selectAllNotificationUsers.addEventListener('change', toggleSelectAllNotificationUsers);
     if (deleteSelectedUsersBtn) deleteSelectedUsersBtn.addEventListener('click', deleteSelectedUsers);
     if (sendNotificationBtn) sendNotificationBtn.addEventListener('click', sendNotificationRequest);
+    if (notificationLinkInput) {
+        notificationLinkInput.addEventListener('change', () => {
+            if (notificationLinkInput.value === 'custom_path') {
+                if (notificationCustomLinkInput) {
+                    notificationCustomLinkInput.style.display = 'block';
+                    notificationCustomLinkInput.focus();
+                }
+            } else {
+                if (notificationCustomLinkInput) {
+                    notificationCustomLinkInput.style.display = 'none';
+                    notificationCustomLinkInput.value = '';
+                }
+            }
+        });
+    }
     if (showInfoBtn) showInfoBtn.addEventListener('click', showUserInfo);
     if (deleteChatBtn) deleteChatBtn.addEventListener('click', deleteCurrentChat);
     if (selectAllConversations) selectAllConversations.addEventListener('change', toggleSelectAllConversations);
@@ -2697,6 +3505,21 @@ function initEventListeners() {
     
     if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
     if (sidebarLogoutBtn) sidebarLogoutBtn.addEventListener('click', handleLogout);
+    
+    // الاستماع لطلبات البيانات والثيم من الـ iframe
+    window.addEventListener('message', (event) => {
+        if (event.data && event.data.type === 'REQUEST_FIREBASE_DATA') {
+            console.log('📨 الـ iframe يطلب البيانات، جاري الإرسال...');
+            sendDataToDashboard();
+        }
+        if (event.data && event.data.type === 'REQUEST_THEME') {
+            // إرسال الثيم الحالي للـ iframe عند الطلب
+            const iframe = document.getElementById('dashboardIframe');
+            if (iframe && iframe.contentWindow) {
+                try { iframe.contentWindow.postMessage({ type: 'SET_THEME', theme: currentTheme || localStorage.getItem('theme') || 'light' }, '*'); } catch(e) {}
+            }
+        }
+    });
 }
 
 // ========== تشغيل التطبيق ==========
@@ -2712,6 +3535,8 @@ function init() {
     
     loadUsers();
     loadAppUsers();
+    loadPageViews();
+    loadNotificationHistory();
     listenToUserUpdates();
     startPresenceRefresh();
     showToast('✨ تم تشغيل لوحة التحكم بنجاح');
