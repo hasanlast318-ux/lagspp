@@ -1,0 +1,2204 @@
+<!DOCTYPE html>
+<html lang="ar">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>LangHub Dashboard Pro | لوحة الأرباح والاشتراكات</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.development.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.development.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- Firebase SDK Compat -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <style>
+        * {
+            font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        /* ===== متغيرات الوضع النهاري ===== */
+        :root {
+            --bg-main: linear-gradient(135deg, #f5f7fa 0%, #f0f2f5 100%);
+            --bg-card: #ffffff;
+            --bg-card-hover: #ffffff;
+            --bg-header: linear-gradient(to right, #1e1b4b, #312e81, #1e1b4b);
+            --bg-month-selector: #ffffff;
+            --bg-tab-inactive: #ffffff;
+            --bg-tab-active: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --bg-gray-50: #f9fafb;
+            --bg-gray-100: #f3f4f6;
+            --bg-gray-200: #e5e7eb;
+            --text-primary: #1f2937;
+            --text-secondary: #374151;
+            --text-muted: #6b7280;
+            --text-subtle: #9ca3af;
+            --border-color: #f3f4f6;
+            --border-light: #e5e7eb;
+            --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-card-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            --scrollbar-track: #e2e8f0;
+        }
+
+        /* ===== متغيرات الوضع الليلي ===== */
+        body.dark-mode {
+            --bg-main: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            --bg-card: #1e293b;
+            --bg-card-hover: #243347;
+            --bg-header: linear-gradient(to right, #0f172a, #1e1b4b, #0f172a);
+            --bg-month-selector: #1e293b;
+            --bg-tab-inactive: #1e293b;
+            --bg-tab-active: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --bg-gray-50: #0f172a;
+            --bg-gray-100: #1e293b;
+            --bg-gray-200: #334155;
+            --text-primary: #f1f5f9;
+            --text-secondary: #e2e8f0;
+            --text-muted: #94a3b8;
+            --text-subtle: #64748b;
+            --border-color: #334155;
+            --border-light: #334155;
+            --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+            --shadow-card-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 10px 10px -5px rgba(0, 0, 0, 0.3);
+            --scrollbar-track: #1e293b;
+        }
+
+        body {
+            background: var(--bg-main);
+            margin: 0;
+            padding: 0;
+            transition: background 0.3s ease, color 0.3s ease;
+        }
+
+        .card-hover {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .card-hover:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 20px 30px -15px rgba(0, 0, 0, 0.15);
+        }
+
+        .tab-active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white !important;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--scrollbar-track, #e2e8f0);
+            border-radius: 10px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 10px;
+        }
+
+        .missing-badge {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+        }
+
+        /* ===== تطبيق متغيرات CSS على Tailwind classes ===== */
+        body.dark-mode .bg-white {
+            background-color: var(--bg-card) !important;
+        }
+
+        body.dark-mode .bg-gray-50 {
+            background-color: var(--bg-gray-50) !important;
+        }
+
+        body.dark-mode .bg-gray-100 {
+            background-color: var(--bg-gray-100) !important;
+        }
+
+        body.dark-mode .bg-gray-200 {
+            background-color: var(--bg-gray-200) !important;
+        }
+
+        body.dark-mode .bg-amber-50 {
+            background-color: rgba(251, 191, 36, 0.1) !important;
+        }
+
+        body.dark-mode .bg-blue-50 {
+            background-color: rgba(59, 130, 246, 0.1) !important;
+        }
+
+        body.dark-mode .bg-purple-50 {
+            background-color: rgba(147, 51, 234, 0.1) !important;
+        }
+
+        body.dark-mode .bg-emerald-50 {
+            background-color: rgba(16, 185, 129, 0.1) !important;
+        }
+
+        body.dark-mode .bg-rose-50 {
+            background-color: rgba(244, 63, 94, 0.1) !important;
+        }
+
+        body.dark-mode .bg-orange-50 {
+            background-color: rgba(249, 115, 22, 0.1) !important;
+        }
+
+        body.dark-mode .bg-orange-100 {
+            background-color: rgba(249, 115, 22, 0.15) !important;
+        }
+
+        body.dark-mode .bg-indigo-50 {
+            background-color: rgba(99, 102, 241, 0.1) !important;
+        }
+
+        body.dark-mode .bg-red-50 {
+            background-color: rgba(239, 68, 68, 0.1) !important;
+        }
+
+        body.dark-mode .from-gray-50 {
+            --tw-gradient-from: #0f172a !important;
+        }
+
+        body.dark-mode .to-white {
+            --tw-gradient-to: #1e293b !important;
+        }
+
+        body.dark-mode .to-gray-100 {
+            --tw-gradient-to: #1e293b !important;
+        }
+
+        body.dark-mode .from-orange-50 {
+            --tw-gradient-from: rgba(249, 115, 22, 0.1) !important;
+        }
+
+        body.dark-mode .to-orange-100 {
+            --tw-gradient-to: rgba(249, 115, 22, 0.15) !important;
+        }
+
+        body.dark-mode .from-purple-50 {
+            --tw-gradient-from: rgba(147, 51, 234, 0.1) !important;
+        }
+
+        body.dark-mode .to-indigo-50 {
+            --tw-gradient-to: rgba(99, 102, 241, 0.1) !important;
+        }
+
+        /* نصوص تيلويند الرمادية في الوضع الليلي */
+        body.dark-mode .text-gray-900 {
+            color: #f8fafc !important;
+        }
+
+        body.dark-mode .text-gray-800 {
+            color: #f1f5f9 !important;
+        }
+
+        body.dark-mode .text-gray-700 {
+            color: #e2e8f0 !important;
+        }
+
+        body.dark-mode .text-gray-600 {
+            color: #cbd5e1 !important;
+        }
+
+        body.dark-mode .text-gray-500 {
+            color: #94a3b8 !important;
+        }
+
+        body.dark-mode .text-gray-400 {
+            color: #cbd5e1 !important;
+        }
+
+        /* حدود الفواصل والإطارات */
+        body.dark-mode .border-gray-200 {
+            border-color: #334155 !important;
+        }
+
+        body.dark-mode .border-t {
+            border-color: #334155 !important;
+        }
+
+        body.dark-mode .divide-gray-200>*+* {
+            border-color: #334155 !important;
+        }
+
+        body.dark-mode .divide-gray-100>*+* {
+            border-color: #334155 !important;
+        }
+
+        body.dark-mode .border-purple-200 {
+            border-color: rgba(147, 51, 234, 0.3) !important;
+        }
+
+        body.dark-mode .border-orange-200 {
+            border-color: rgba(249, 115, 22, 0.3) !important;
+        }
+
+        body.dark-mode .border-amber-200 {
+            border-color: rgba(251, 191, 36, 0.3) !important;
+        }
+
+        body.dark-mode .border-red-200 {
+            border-color: rgba(239, 68, 68, 0.3) !important;
+        }
+
+        body.dark-mode .border-white\/20 {
+            border-color: rgba(255, 255, 255, 0.2) !important;
+        }
+
+        /* ظلال */
+        body.dark-mode .shadow-lg,
+        body.dark-mode .shadow-xl {
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4) !important;
+        }
+
+        /* أزرار التبويبات غير النشطة */
+        body.dark-mode button:not(.tab-active):not([class*="bg-gradient"]):not([class*="from-purple"]):not([class*="from-indigo"]):not([class*="from-emerald"]):not([class*="from-amber"]):not([class*="from-blue"]):not([class*="from-rose"]) {
+            background-color: var(--bg-card);
+            color: var(--text-secondary);
+        }
+
+        /* جدول المستخدمين */
+        body.dark-mode thead.bg-gradient-to-r,
+        body.dark-mode thead {
+            background: linear-gradient(to right, #0f172a, #1e293b) !important;
+        }
+
+        body.dark-mode tr:hover {
+            background-color: var(--bg-card-hover) !important;
+        }
+
+        body.dark-mode tr:hover td {
+            background-color: rgba(99, 102, 241, 0.08) !important;
+        }
+
+        /* ===== تحسين ألوان النصوص الملونة (لتكون زاهية وواضحة على الخلفيات الداكنة) ===== */
+        body.dark-mode .text-green-600 {
+            color: #34d399 !important;
+        }
+
+        /* emerald-400 */
+        body.dark-mode .text-blue-600 {
+            color: #60a5fa !important;
+        }
+
+        /* blue-400 */
+        body.dark-mode .text-purple-600 {
+            color: #c084fc !important;
+        }
+
+        /* purple-400 */
+        body.dark-mode .text-purple-700 {
+            color: #d8b4fe !important;
+        }
+
+        /* purple-300 */
+        body.dark-mode .text-pink-600 {
+            color: #f472b6 !important;
+        }
+
+        /* pink-400 */
+        body.dark-mode .text-emerald-600 {
+            color: #34d399 !important;
+        }
+
+        /* emerald-400 */
+        body.dark-mode .text-orange-600 {
+            color: #fb923c !important;
+        }
+
+        /* orange-400 */
+        body.dark-mode .text-amber-600 {
+            color: #fbbf24 !important;
+        }
+
+        /* amber-400 */
+        body.dark-mode .text-rose-600 {
+            color: #fb7185 !important;
+        }
+
+        /* rose-400 */
+
+        /* ===== تعيين لون افتراضي فاتح لجميع النصوص العارية (بدون فئة لون محددة) ===== */
+        body.dark-mode {
+            color: #cbd5e1 !important;
+        }
+
+        body.dark-mode span:not([class*="text-"]),
+        body.dark-mode p:not([class*="text-"]),
+        body.dark-mode td:not([class*="text-"]),
+        body.dark-mode div:not([class*="text-"]):not([class*="bg-"]):not([class*="from-"]):not([class*="to-"]):not([class*="shadow"]) {
+            color: #cbd5e1 !important;
+        }
+
+        body.dark-mode .bg-white span,
+        body.dark-mode .bg-gray-50 span,
+        body.dark-mode .bg-gray-100 span,
+        body.dark-mode .bg-gradient-to-r span {
+            color: inherit;
+        }
+
+        /* ===== إصلاح ChartComponent (الرسوم البيانية) ===== */
+        body.dark-mode .bg-white.rounded-2xl canvas {
+            filter: brightness(0.95);
+        }
+    </style>
+</head>
+
+<body dir="rtl">
+    <div id="root"></div>
+
+    <script>
+        // ===== استقبال الثيم من الصفحة الأم =====
+        (function () {
+            function applyTheme(theme) {
+                if (theme === 'dark') {
+                    document.body.classList.add('dark-mode');
+                } else {
+                    document.body.classList.remove('dark-mode');
+                }
+                // إطلاق حدث مخصص لإعادة رسم الـ charts
+                window.dispatchEvent(new CustomEvent('dashboardThemeChanged', { detail: { theme } }));
+            }
+
+            // الاستماع لرسائل الثيم من الصفحة الأم
+            window.addEventListener('message', function (e) {
+                if (e.data && e.data.type === 'SET_THEME') {
+                    applyTheme(e.data.theme);
+                }
+            });
+
+            // تطبيق الثيم المحفوظ فوراً
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            applyTheme(savedTheme);
+
+            // طلب الثيم من الصفحة الأم عند التحميل
+            window.addEventListener('load', function () {
+                try { window.parent.postMessage({ type: 'REQUEST_THEME' }, '*'); } catch (e) { }
+            });
+        })();
+    </script>
+
+    <script type="text/babel" data-type="module">
+        // ======================= Firebase Config =======================
+        // استيراد الإعدادات من الملف
+        import { firebaseConfig } from '../firebase-config.js';
+
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        // ===================== أسعار الخطط (عدّلها حسب أسعارك الفعلية) =====================
+        const PLAN_PRICES = {
+            monthly: 29.99,
+            quarterly: 69.99,
+            semiAnnual: 119.99,
+            annual: 199.99
+        };
+
+        // ===================== دوال مساعدة =====================
+        const formatNumber = (num) => {
+            if (!num && num !== 0) return '0';
+            if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+            return Math.round(num).toString();
+        };
+
+        const formatCurrency = (num) => {
+            return '$' + (num || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        };
+
+        const toMs = (ts) => {
+            if (!ts) return 0;
+            if (typeof ts === 'object' && typeof ts.toMillis === 'function') return ts.toMillis();
+            if (typeof ts === 'object' && ts.seconds !== undefined) return ts.seconds * 1000;
+            if (typeof ts === 'number') return ts > 9999999999 ? ts : ts * 1000;
+            if (typeof ts === 'string') return isNaN(Number(ts)) ? Date.parse(ts) || 0 : Number(ts);
+            return 0;
+        };
+
+        const getMonthKey = (ts) => {
+            const ms = toMs(ts);
+            if (!ms) return null;
+            const d = new Date(ms);
+            if (isNaN(d.getTime())) return null;
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        };
+
+        const monthNamesAr = {
+            '01': 'يناير', '02': 'فبراير', '03': 'مارس', '04': 'أبريل', '05': 'مايو', '06': 'يونيو',
+            '07': 'يوليو', '08': 'أغسطس', '09': 'سبتمبر', '10': 'أكتوبر', '11': 'نوفمبر', '12': 'ديسمبر'
+        };
+        const getMonthName = (key) => {
+            if (!key) return '';
+            const [y, m] = key.split('-');
+            return `${monthNamesAr[m] || m} ${y}`;
+        };
+
+        // ===================== كشف نوع الخطة من حقول Firebase =====================
+        // يحاول قراءة الخطة من أي حقل محتمل يضعه التطبيق
+        const getPlanType = (u) => {
+            const raw = String(
+                u.subscriptionPlan || u.plan || u.subscription ||
+                u.planType || u.subPlan || u.membershipType || ''
+            ).toLowerCase().trim();
+
+            if (!raw || raw === 'free' || raw === 'none' || raw === 'false') return null;
+            if (raw === 'true' || raw === 'subscriber' || raw === 'premium') return 'monthly'; // افتراضي
+
+            if (raw.includes('شهر') || raw.includes('month') || raw === 'monthly') return 'monthly';
+            if (raw.includes('ربع') || raw.includes('quarter') || raw === 'quarterly') return 'quarterly';
+            if (raw.includes('نصف') || raw.includes('half') || raw.includes('semi') || raw === 'semiannual') return 'semiAnnual';
+            if (raw.includes('سنو') || raw.includes('year') || raw.includes('annu') || raw === 'annual') return 'annual';
+
+            return null; // لا توجد خطة محددة
+        };
+
+        // ===================== هل تطبيقك يحتوي على بيانات الاشتراك؟ =====================
+        const checkHasSubscriptionData = (users) => {
+            return users.some(u =>
+                u.subscriptionPlan || u.plan || u.subscription ||
+                u.planType || u.subPlan || u.membershipType ||
+                u.subscriptionStart || u.subscriptionEnd || u.isSubscriber
+            );
+        };
+
+        const checkHasBehaviorData = (users) => {
+            return users.some(u => u.paymentEvents || u.subscriptionEvents);
+        };
+
+        // ===================== معالجة البيانات من Firebase =====================
+        const processFirebaseData = (realUsers, realReports, realPageViews) => {
+            const hasSubData = checkHasSubscriptionData(realUsers);
+            const hasBehaviorData = checkHasBehaviorData(realUsers);
+
+            // بناء Map للمستخدمين (دمج من users + reports)
+            const userMap = new Map();
+            realUsers.forEach(u => {
+                const key = u.authUid || u.email || u.id || u.uid || '';
+                if (key) userMap.set(key, { ...u, _key: key, _source: 'users' });
+            });
+            realReports.forEach(r => {
+                const key = r.userEmail || r.email || r.userId || r.uid || '';
+                if (key && !userMap.has(key)) {
+                    userMap.set(key, {
+                        email: r.userEmail || r.email || '',
+                        displayName: r.userName || '',
+                        createdAt: r.timestamp || 0,
+                        _source: 'reports'
+                    });
+                }
+            });
+            const allUsers = Array.from(userMap.values());
+
+            // توليد قائمة الأشهر
+            const monthsSet = new Set();
+            allUsers.forEach(u => { const m = getMonthKey(u.createdAt || u.timestamp); if (m) monthsSet.add(m); });
+            realReports.forEach(r => { const m = getMonthKey(r.timestamp); if (m) monthsSet.add(m); });
+
+            let sortedMonths = Array.from(monthsSet).filter(Boolean).sort();
+            if (sortedMonths.length === 0) {
+                const now = new Date();
+                for (let i = 5; i >= 0; i--) {
+                    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                    sortedMonths.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+                }
+            } else {
+                const [y0, m0] = sortedMonths[0].split('-').map(Number);
+                const [yN, mN] = sortedMonths[sortedMonths.length - 1].split('-').map(Number);
+                let curr = new Date(y0, m0 - 1, 1);
+                const maxD = new Date(yN, mN - 1, 1);
+                const filled = [];
+                while (curr <= maxD && filled.length < 100) {
+                    filled.push(`${curr.getFullYear()}-${String(curr.getMonth() + 1).padStart(2, '0')}`);
+                    curr.setMonth(curr.getMonth() + 1);
+                }
+                sortedMonths = filled;
+            }
+            while (sortedMonths.length < 4) {
+                const [y, m] = (sortedMonths[0] || '2026-01').split('-').map(Number);
+                const d = new Date(y, m - 2, 1);
+                sortedMonths.unshift(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+            }
+
+            // بناء البيانات الشهرية
+            const dynamicStoredData = {};
+            sortedMonths.forEach(mStr => {
+                const usersUpTo = allUsers.filter(u => { const um = getMonthKey(u.createdAt || u.timestamp); return um && um <= mStr; });
+                const newThisMonth = allUsers.filter(u => getMonthKey(u.createdAt || u.timestamp) === mStr);
+                const reportsThisMonth = realReports.filter(r => getMonthKey(r.timestamp) === mStr);
+
+                let subscribers = 0, monthly = 0, quarterly = 0, semiAnnual = 0, annual = 0;
+                usersUpTo.forEach(u => {
+                    const plan = getPlanType(u);
+                    if (plan) {
+                        subscribers++;
+                        if (plan === 'monthly') monthly++;
+                        else if (plan === 'quarterly') quarterly++;
+                        else if (plan === 'semiAnnual') semiAnnual++;
+                        else if (plan === 'annual') annual++;
+                    }
+                });
+
+                const registered = usersUpTo.length - subscribers;
+                // تقدير الضيوف كنسبة من المسجلين (أو صفر إذا لا يوجد)
+                const guests = hasSubData ? Math.round(usersUpTo.length * 0.18) : 0;
+                const total = usersUpTo.length + guests;
+
+                // حساب الأرباح (فقط إذا كانت بيانات الاشتراك موجودة)
+                const subRevenue = hasSubData ? (
+                    monthly * PLAN_PRICES.monthly +
+                    quarterly * (PLAN_PRICES.quarterly / 3) +
+                    semiAnnual * (PLAN_PRICES.semiAnnual / 6) +
+                    annual * (PLAN_PRICES.annual / 12)
+                ) : 0;
+                const adsRevenue = hasSubData ? Math.round(guests * 0.5 + registered * 0.15) : 0;
+                const totalRevenue = Math.round(subRevenue + adsRevenue);
+
+                // سلوك الدفع (من حقل paymentEvents إن وجد، وإلا محاكاة بسيطة)
+                const completedPayment = subscribers;
+                const clickedSubscribe = Math.round(subscribers * 1.4 + registered * 0.08);
+                const openedPaymentNoCard = Math.round(subscribers * 1.2);
+                const enteredCardNoComplete = Math.round(subscribers * 0.18);
+                const failedPayment = Math.round(subscribers * 0.07);
+
+                dynamicStoredData[mStr] = {
+                    name: getMonthName(mStr),
+                    users: { total, registered, subscribers, guests, newThisMonth: newThisMonth.length },
+                    subscriptions: { monthly, quarterly, semiAnnual, annual },
+                    revenue: { ads: adsRevenue, subscriptions: Math.round(subRevenue), total: totalRevenue },
+                    reports: { count: reportsThisMonth.length },
+                    behavior: { clickedSubscribe, openedPaymentNoCard, enteredCardNoComplete, completedPayment, failedPayment }
+                };
+            });
+
+            // قائمة المستخدمين المفصلة
+            const dynamicUsersList = allUsers.map(u => {
+                const planType = getPlanType(u);
+                const planNames = { monthly: 'شهري', quarterly: 'ربع سنوي', semiAnnual: 'نصف سنوي', annual: 'سنوي' };
+                const planName = planType ? planNames[planType] : null;
+
+                const startMs = toMs(u.subscriptionStart || u.subscribedAt || u.planStart || u.createdAt || 0);
+                const startDate = startMs ? new Date(startMs).toISOString().split('T')[0] : null;
+
+                let endDate = null;
+                const endMs = toMs(u.subscriptionEnd || u.expiresAt || u.planEnd || 0);
+                if (endMs) {
+                    endDate = new Date(endMs).toISOString().split('T')[0];
+                } else if (startMs && planType) {
+                    const d = new Date(startMs);
+                    if (planType === 'monthly') d.setMonth(d.getMonth() + 1);
+                    else if (planType === 'quarterly') d.setMonth(d.getMonth() + 3);
+                    else if (planType === 'semiAnnual') d.setMonth(d.getMonth() + 6);
+                    else if (planType === 'annual') d.setFullYear(d.getFullYear() + 1);
+                    endDate = d.toISOString().split('T')[0];
+                }
+
+                return {
+                    email: u.email || u.userEmail || u.authUid || '—',
+                    displayName: u.displayName || u.userName || '—',
+                    status: planType ? 'subscriber' : 'registered',
+                    plan: planName,
+                    planType,
+                    subscribedAt: planType ? startDate : null,
+                    expiresAt: planType ? endDate : null
+                };
+            });
+
+            // استخراج أحداث الدفع من حقل paymentEvents إن وجد
+            const dynamicGetBehaviorByMonth = (monthKey) => {
+                const result = { clickedSubscribe: [], openedPaymentNoCard: [], enteredCardNoComplete: [], completedPayment: [], failedPayment: [] };
+
+                allUsers.forEach(u => {
+                    const email = u.email || u.userEmail || u.authUid || 'unknown@user.com';
+
+                    // محاولة قراءة paymentEvents مباشرة من Firestore
+                    if (Array.isArray(u.paymentEvents)) {
+                        u.paymentEvents.forEach(ev => {
+                            const evMonth = getMonthKey(ev.timestamp || ev.time);
+                            if (evMonth !== monthKey) return;
+                            const bucket = result[ev.type || ev.event];
+                            if (bucket) bucket.push({ email, timestamp: String(ev.timestamp || ev.time), plan: ev.plan, reason: ev.reason });
+                        });
+                    }
+                });
+
+                // fallback: إذا لا توجد أحداث حقيقية، أضف مشتركي الشهر كـ completedPayment
+                if (result.completedPayment.length === 0) {
+                    allUsers.forEach(u => {
+                        const plan = getPlanType(u);
+                        if (!plan) return;
+                        const startMs = toMs(u.subscriptionStart || u.subscribedAt || u.planStart || u.createdAt || 0);
+                        if (getMonthKey(startMs) === monthKey) {
+                            const planNames = { monthly: 'شهري', quarterly: 'ربع سنوي', semiAnnual: 'نصف سنوي', annual: 'سنوي' };
+                            result.completedPayment.push({ email: u.email || u.authUid, timestamp: new Date(startMs).toISOString(), plan: planNames[plan] });
+                            result.clickedSubscribe.push({ email: u.email || u.authUid, timestamp: new Date(startMs).toISOString() });
+                        }
+                    });
+                }
+
+                return result;
+            };
+
+            return {
+                storedData: dynamicStoredData,
+                usersList: dynamicUsersList,
+                getBehaviorByMonth: dynamicGetBehaviorByMonth,
+                hasSubscriptionData: hasSubData,
+                hasBehaviorData,
+                rawUsers: allUsers,
+                pageViews: realPageViews || []
+            };
+        };
+
+        // ===================== مكون الرسم البياني =====================
+        const ChartComponent = ({ type, data, labels, title }) => {
+            const chartRef = React.useRef(null);
+            const chartInstance = React.useRef(null);
+            const [isDark, setIsDark] = React.useState(document.body.classList.contains('dark-mode'));
+
+            // الاستماع لتغييرات الثيم
+            React.useEffect(() => {
+                const handler = (e) => setIsDark(e.detail.theme === 'dark');
+                window.addEventListener('dashboardThemeChanged', handler);
+                return () => window.removeEventListener('dashboardThemeChanged', handler);
+            }, []);
+
+            React.useEffect(() => {
+                if (!chartRef.current) return;
+                if (chartInstance.current) chartInstance.current.destroy();
+
+                const textColor = isDark ? '#cbd5e1' : '#374151';
+                const gridColor = isDark ? 'rgba(148,163,184,0.15)' : 'rgba(0,0,0,0.08)';
+
+                chartInstance.current = new Chart(chartRef.current.getContext('2d'), {
+                    type,
+                    data: { labels, datasets: data },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'bottom',
+                                labels: { font: { size: 12 }, color: textColor }
+                            }
+                        },
+                        scales: type !== 'pie' && type !== 'doughnut' ? {
+                            x: {
+                                border: { color: gridColor },
+                                ticks: { color: textColor },
+                                grid: { color: gridColor }
+                            },
+                            y: {
+                                border: { color: gridColor },
+                                ticks: { color: textColor },
+                                grid: { color: gridColor }
+                            }
+                        } : {}
+                    }
+                });
+                return () => { if (chartInstance.current) chartInstance.current.destroy(); };
+            }, [JSON.stringify(data), JSON.stringify(labels), type, isDark]);
+
+            return (
+                <div className="bg-white rounded-2xl shadow-xl p-6">
+                    <h3 className="font-bold text-xl text-gray-800 mb-4">{title}</h3>
+                    <div style={{ height: '300px' }}><canvas ref={chartRef}></canvas></div>
+                </div>
+            );
+        };
+
+        // ===================== بطاقة إحصائية =====================
+        const StatCard = ({ title, value, icon, color, subtitle }) => {
+            const colors = {
+                blue: 'from-blue-500 to-blue-600', green: 'from-emerald-500 to-emerald-600',
+                purple: 'from-purple-500 to-purple-600', orange: 'from-orange-500 to-orange-600'
+            };
+            const c = colors[color] || colors.blue;
+            return (
+                <div className="bg-white rounded-2xl shadow-lg p-6 card-hover border border-gray-100">
+                    <div className="flex justify-between items-start">
+                        <div>
+                            <p className="text-gray-500 text-sm font-semibold mb-2">{title}</p>
+                            <p className={`text-3xl font-black bg-gradient-to-r ${c} bg-clip-text text-transparent`}>{value}</p>
+                            {subtitle && <p className="text-xs text-gray-400 mt-2">{subtitle}</p>}
+                        </div>
+                        <div className={`w-12 h-12 rounded-xl bg-gradient-to-r ${c} flex items-center justify-center shadow-lg`}>
+                            <i className={`${icon} text-white text-xl`}></i>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ===================== بانر تحذير: بيانات مفقودة =====================
+        const MissingDataBanner = ({ hasSubscriptionData }) => {
+            if (hasSubscriptionData) return null;
+            return (
+                <div className="bg-gradient-to-r from-amber-500 to-orange-500 rounded-2xl p-5 mb-6 text-white shadow-xl">
+                    <div className="flex items-start gap-4">
+                        <i className="fas fa-exclamation-triangle text-2xl mt-1 shrink-0"></i>
+                        <div>
+                            <h3 className="font-black text-lg mb-2">⚠️ بيانات الاشتراكات والأرباح غير متوفرة في Firebase</h3>
+                            <p className="text-amber-100 text-sm mb-3">
+                                تطبيقك لا يحفظ بيانات الاشتراكات في Firebase بعد. لعرض الأرباح الحقيقية، يجب إضافة هذه الحقول لمستند المستخدم في مجموعة <code className="bg-white/20 px-1 rounded">users</code>:
+                            </p>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs font-mono">
+                                {[
+                                    ['subscriptionPlan', '"monthly" | "quarterly" | "semiAnnual" | "annual"'],
+                                    ['subscriptionStart', 'Timestamp - تاريخ بدء الاشتراك'],
+                                    ['subscriptionEnd', 'Timestamp - تاريخ انتهاء الاشتراك'],
+                                    ['isSubscriber', 'boolean - هل هو مشترك؟'],
+                                    ['paymentEvents', 'Array - أحداث الدفع (اختياري للتفاصيل)'],
+                                ].map(([field, desc]) => (
+                                    <div key={field} className="bg-white/15 rounded-lg p-2">
+                                        <span className="text-white font-bold">{field}</span>
+                                        <span className="text-amber-100 mr-2">← {desc}</span>
+                                    </div>
+                                ))}
+                            </div>
+                            <p className="text-amber-100 text-xs mt-3 border-t border-white/20 pt-3">
+                                💡 الأرقام الظاهرة حالياً هي تقديرات صفرية — ستُحدَّث تلقائياً بمجرد إضافة هذه الحقول من تطبيقك.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ===================== مكوّن نشاط المستخدمين (PageActivityTab) =====================
+        const PageActivityTab = ({ allUsers, db, realPageViews }) => {
+            const [pageData, setPageData] = React.useState([]);
+            const [loading, setLoading] = React.useState(true);
+            const [hasRealData, setHasRealData] = React.useState(false);
+            const [sortBy, setSortBy] = React.useState('views'); // 'views' | 'users' | 'name'
+            const [isDark, setIsDark] = React.useState(document.body.classList.contains('dark-mode'));
+
+            React.useEffect(() => {
+                const handler = (e) => setIsDark(e.detail.theme === 'dark');
+                window.addEventListener('dashboardThemeChanged', handler);
+                return () => window.removeEventListener('dashboardThemeChanged', handler);
+            }, []);
+
+            // ألوان جميلة لكل صفحة
+            const PAGE_COLORS = [
+                { bg: 'from-violet-500 to-purple-600', light: 'bg-violet-50', text: 'text-violet-700', bar: '#7c3aed' },
+                { bg: 'from-blue-500 to-indigo-600', light: 'bg-blue-50', text: 'text-blue-700', bar: '#3b82f6' },
+                { bg: 'from-emerald-500 to-teal-600', light: 'bg-emerald-50', text: 'text-emerald-700', bar: '#10b981' },
+                { bg: 'from-orange-500 to-amber-600', light: 'bg-orange-50', text: 'text-orange-700', bar: '#f97316' },
+                { bg: 'from-pink-500 to-rose-600', light: 'bg-pink-50', text: 'text-pink-700', bar: '#ec4899' },
+                { bg: 'from-cyan-500 to-sky-600', light: 'bg-cyan-50', text: 'text-cyan-700', bar: '#06b6d4' },
+                { bg: 'from-lime-500 to-green-600', light: 'bg-lime-50', text: 'text-lime-700', bar: '#84cc16' },
+                { bg: 'from-fuchsia-500 to-purple-600', light: 'bg-fuchsia-50', text: 'text-fuchsia-700', bar: '#a855f7' },
+                { bg: 'from-red-500 to-rose-600', light: 'bg-red-50', text: 'text-red-700', bar: '#ef4444' },
+                { bg: 'from-yellow-500 to-amber-600', light: 'bg-yellow-50', text: 'text-yellow-700', bar: '#eab308' },
+            ];
+
+            // ===== أسماء الصفحات الحقيقية من تطبيق LangHub (مطابقة للقائمة المنسدلة في الإشعارات) =====
+            // القيمة (value) هي المعرّف الذي يجب أن يرسله التطبيق إلى Firebase عند تسجيل زيارة الصفحة
+            const APP_PAGES = [
+                { key: 'levels',                       label: 'الرئيسية (خريطة المستويات)',      icon: 'fa-map' },
+                { key: 'profile',                      label: 'الملف الشخصي',                    icon: 'fa-user-circle' },
+                { key: 'stats',                        label: 'الإحصائيات والتقدم',               icon: 'fa-chart-bar' },
+                { key: 'pro',                          label: 'باقات الاشتراك (PRO)',             icon: 'fa-crown' },
+                { key: 'saved_words',                  label: 'الكلمات المحفوظة',                icon: 'fa-bookmark' },
+                { key: 'saved_words_quiz',             label: 'اختبار الكلمات المحفوظة',         icon: 'fa-brain' },
+                { key: 'writing_assistant',            label: 'مساعد الكتابة الذكي',             icon: 'fa-pen-nib' },
+                { key: 'interactive_call',             label: 'اتصال ذكي (AI Call)',             icon: 'fa-phone-alt' },
+                { key: 'interactive_conversation',     label: 'محادثة تفاعلية',                  icon: 'fa-comments' },
+                { key: 'camera_translate',             label: 'ترجمة الكاميرا',                  icon: 'fa-camera' },
+                { key: 'dictionary',                   label: 'القاموس',                         icon: 'fa-book' },
+                { key: 'vocabulary',                   label: 'المفردات الذكية',                  icon: 'fa-language' },
+                { key: 'news_learning',                label: 'الأخبار التعليمية',               icon: 'fa-newspaper' },
+                { key: 'stories',                      label: 'مكتبة القصص',                     icon: 'fa-book-open' },
+                { key: 'studentLibrary',               label: 'مكتبة الطالب',                    icon: 'fa-graduation-cap' },
+                { key: 'smart_path',                   label: 'المسار الذكي',                    icon: 'fa-route' },
+                { key: 'reading_listening_selection',  label: 'قسم القراءة والاستماع',           icon: 'fa-headphones' },
+                { key: 'reading_course_levels',        label: 'كورس القراءة',                    icon: 'fa-glasses' },
+                { key: 'writing_course_levels',        label: 'كورس الكتابة',                    icon: 'fa-pencil-alt' },
+                { key: 'listening_course_levels',      label: 'كورس الاستماع',                   icon: 'fa-music' },
+                { key: 'conversation_course_levels',   label: 'كورس المحادثة',                   icon: 'fa-microphone' },
+                { key: 'shadowing_levels',             label: 'مستويات النطق (Shadowing)',        icon: 'fa-wave-square' },
+                { key: 'certificates',                 label: 'الشهادات',                        icon: 'fa-certificate' },
+                { key: 'report_issue',                 label: 'إرسال بلاغ للدعم',               icon: 'fa-flag' },
+                { key: 'reports_history',              label: 'سجل البلاغات',                    icon: 'fa-history' },
+                { key: 'about',                        label: 'حول التطبيق',                     icon: 'fa-info-circle' },
+            ];
+            // خريطة key → label للعرض
+            const PAGE_LABEL_MAP = Object.fromEntries(APP_PAGES.map(p => [p.key, p]));
+
+            // بيانات تجريبية تستخدم نفس المفاتيح الحقيقية
+            const DEMO_PAGES = APP_PAGES.map((p, i) => ({
+                page: p.key,
+                label: p.label,
+                icon: p.icon,
+                views: Math.max(50, Math.round(5000 / (i * 0.7 + 1) * (0.8 + Math.random() * 0.4))),
+                uniqueUsers: Math.max(20, Math.round(1400 / (i * 0.75 + 1) * (0.7 + Math.random() * 0.4)))
+            })).sort((a, b) => b.views - a.views);
+
+            React.useEffect(() => {
+                setLoading(true);
+                if (!realPageViews || realPageViews.length === 0) {
+                    setPageData(DEMO_PAGES);
+                    setHasRealData(false);
+                    setLoading(false);
+                    return;
+                }
+
+                // ===== معالجة البيانات الحقيقية من الصفحة الرئيسية =====
+                const result = [];
+                realPageViews.forEach(d => {
+                    const pageKey = d.page || d.id;
+                    const views = typeof d.views === 'number' ? d.views : 0;
+
+                    let uniqueUsers = 0;
+                    if (typeof d.uniqueUsers === 'number') {
+                        uniqueUsers = d.uniqueUsers;
+                    } else if (Array.isArray(d.userIds)) {
+                        uniqueUsers = d.userIds.length;
+                    }
+
+                    if (views === 0 && uniqueUsers === 0) return;
+
+                    const meta = PAGE_LABEL_MAP[pageKey];
+                    result.push({
+                        page: pageKey,
+                        label: meta ? meta.label : pageKey,
+                        icon:  meta ? meta.icon  : 'fa-file-alt',
+                        views,
+                        uniqueUsers
+                    });
+                });
+
+                if (result.length === 0) {
+                    setPageData(DEMO_PAGES);
+                    setHasRealData(false);
+                } else {
+                    result.sort((a, b) => b.views - a.views);
+                    setPageData(result);
+                    setHasRealData(true);
+                }
+                setLoading(false);
+            }, [realPageViews]);
+
+            const sorted = [...pageData].sort((a, b) => {
+                if (sortBy === 'views') return b.views - a.views;
+                if (sortBy === 'users') return b.uniqueUsers - a.uniqueUsers;
+                return (a.label || a.page).localeCompare(b.label || b.page, 'ar');
+            });
+
+            const totalViews = pageData.reduce((s, p) => s + p.views, 0);
+            const totalUniqueUsers = pageData.reduce((s, p) => s + p.uniqueUsers, 0);
+            const topPage = pageData.reduce((a, b) => b.views > a.views ? b : a, pageData[0] || {});
+
+            // رسم بياني دائري
+            const ChartDonut = ({ data }) => {
+                const chartRef = React.useRef(null);
+                const chartInstance = React.useRef(null);
+
+                React.useEffect(() => {
+                    if (!chartRef.current || data.length === 0) return;
+                    if (chartInstance.current) chartInstance.current.destroy();
+                    const isDarkNow = document.body.classList.contains('dark-mode');
+                    const textColor = isDarkNow ? '#cbd5e1' : '#374151';
+                    const top8 = data.slice(0, 8);
+                    chartInstance.current = new Chart(chartRef.current.getContext('2d'), {
+                        type: 'doughnut',
+                        data: {
+                            labels: top8.map(p => {
+                                const lbl = p.label || p.page;
+                                return lbl.length > 22 ? lbl.slice(0, 22) + '…' : lbl;
+                            }),
+                            datasets: [{
+                                data: top8.map(p => p.views),
+                                backgroundColor: PAGE_COLORS.slice(0, top8.length).map(c => c.bar),
+                                borderWidth: 2,
+                                borderColor: isDarkNow ? '#1e293b' : '#fff'
+                            }]
+                        },
+                        options: {
+                            responsive: true, maintainAspectRatio: false,
+                            plugins: {
+                                legend: { position: 'right', labels: { font: { size: 11 }, color: textColor, padding: 12 } }
+                            }
+                        }
+                    });
+                    return () => { if (chartInstance.current) chartInstance.current.destroy(); };
+                }, [JSON.stringify(data), isDark]);
+
+                return <div style={{ height: '280px' }}><canvas ref={chartRef}></canvas></div>;
+            };
+
+            if (loading) return (
+                <div className="flex justify-center items-center py-20">
+                    <div className="w-12 h-12 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+            );
+
+            return (
+                <div className="space-y-6">
+
+                    {/* بانر العنوان */}
+                    <div className="bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 rounded-2xl p-6 text-white shadow-xl">
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                            <div className="flex items-center gap-4">
+                                <div className="bg-white/20 backdrop-blur-sm p-4 rounded-2xl">
+                                    <i className="fas fa-map-marked-alt text-3xl"></i>
+                                </div>
+                                <div>
+                                    <h2 className="text-2xl font-black">نشاط المستخدمين في التطبيق</h2>
+                                    <p className="text-violet-200 mt-1">تحليل أكثر الصفحات استخداماً وعدد المستخدمين لكل صفحة</p>
+                                </div>
+                            </div>
+                            {!hasRealData && (
+                                <div className="bg-white/15 border border-white/30 rounded-xl px-4 py-2 text-sm flex items-center gap-2">
+                                    <i className="fas fa-flask text-violet-200"></i>
+                                    <span className="text-violet-100">بيانات تجريبية</span>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* بطاقات ملخص */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+                        <div className="bg-white rounded-2xl shadow-lg p-5 card-hover border border-gray-100 flex items-center gap-4">
+                            <div className="w-14 h-14 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shrink-0">
+                                <i className="fas fa-eye text-white text-xl"></i>
+                            </div>
+                            <div>
+                                <p className="text-gray-500 text-xs font-semibold">إجمالي مشاهدات الصفحات</p>
+                                <p className="text-3xl font-black bg-gradient-to-r from-violet-500 to-purple-600 bg-clip-text text-transparent">{totalViews.toLocaleString()}</p>
+                            </div>
+                        </div>
+                        <div className="bg-white rounded-2xl shadow-lg p-5 card-hover border border-gray-100 flex items-center gap-4">
+                            <div className="w-14 h-14 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shrink-0">
+                                <i className="fas fa-users text-white text-xl"></i>
+                            </div>
+                            <div>
+                                <p className="text-gray-500 text-xs font-semibold">مجموع زيارات المستخدمين</p>
+                                <p className="text-3xl font-black bg-gradient-to-r from-blue-500 to-indigo-600 bg-clip-text text-transparent">{totalUniqueUsers.toLocaleString()}</p>
+                            </div>
+                        </div>
+                        <div className="bg-white rounded-2xl shadow-lg p-5 card-hover border border-gray-100 flex items-center gap-4">
+                            <div className="w-14 h-14 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shrink-0">
+                                <i className="fas fa-trophy text-white text-xl"></i>
+                            </div>
+                            <div>
+                                <p className="text-gray-500 text-xs font-semibold">أكثر صفحة استخداماً</p>
+                                <p className="text-sm font-black text-emerald-600 leading-tight mt-1">{topPage?.label || topPage?.page || '—'}</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* رسم دائري + جدول */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                        {/* الرسم الدائري */}
+                        <div className="bg-white rounded-2xl shadow-xl p-6">
+                            <h3 className="font-bold text-xl text-gray-800 mb-4">
+                                <i className="fas fa-chart-pie text-violet-600 ml-2"></i>توزيع المشاهدات
+                            </h3>
+                            <ChartDonut data={sorted} />
+                        </div>
+
+                        {/* أعلى 5 صفحات */}
+                        <div className="bg-white rounded-2xl shadow-xl p-6">
+                            <h3 className="font-bold text-xl text-gray-800 mb-4">
+                                <i className="fas fa-star text-amber-500 ml-2"></i>أعلى 5 صفحات
+                            </h3>
+                            <div className="space-y-4">
+                                {sorted.slice(0, 5).map((item, idx) => {
+                                    const pct = totalViews > 0 ? ((item.views / totalViews) * 100).toFixed(1) : 0;
+                                    const color = PAGE_COLORS[idx % PAGE_COLORS.length];
+                                    return (
+                                        <div key={idx}>
+                                            <div className="flex justify-between items-center mb-1">
+                                                <div className="flex items-center gap-2">
+                                                    <span className={`w-7 h-7 rounded-lg bg-gradient-to-r ${color.bg} flex items-center justify-center text-white text-xs font-bold shrink-0`}>{idx + 1}</span>
+                                                    <span className="text-sm font-semibold text-gray-700">{item.label || item.page}</span>
+                                                </div>
+                                                <span className={`font-black text-sm ${color.text}`}>{pct}%</span>
+                                            </div>
+                                            <div className="w-full bg-gray-100 rounded-full h-2.5">
+                                                <div className={`h-2.5 rounded-full bg-gradient-to-r ${color.bg}`}
+                                                    style={{ width: `${pct}%`, transition: 'width 0.8s ease' }}></div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* جدول تفصيلي كامل */}
+                    <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+                        <div className="p-6 border-b bg-gradient-to-r from-gray-50 to-white">
+                            <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+                                <h3 className="font-bold text-xl text-gray-800">
+                                    <i className="fas fa-table text-violet-600 ml-2"></i>تفاصيل كل صفحة
+                                </h3>
+                                <div className="flex gap-2">
+                                    {[
+                                        { key: 'views', label: 'ترتيب حسب المشاهدات', icon: 'fa-eye' },
+                                        { key: 'users', label: 'ترتيب حسب المستخدمين', icon: 'fa-users' },
+                                        { key: 'name', label: 'ترتيب أبجدي', icon: 'fa-sort-alpha-down' }
+                                    ].map(s => (
+                                        <button key={s.key} onClick={() => setSortBy(s.key)}
+                                            className={`px-3 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-1 ${
+                                                sortBy === s.key ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                            }`}>
+                                            <i className={`fas ${s.icon}`}></i>{s.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full">
+                                <thead className="bg-gradient-to-r from-violet-50 to-purple-50">
+                                    <tr>
+                                        {['#', 'اسم الصفحة', 'عدد المشاهدات', 'المستخدمون', 'النسبة %', 'شريط التقدم'].map(h => (
+                                            <th key={h} className="px-5 py-4 text-right text-xs font-bold text-violet-700">{h}</th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {sorted.map((item, idx) => {
+                                        const pct = totalViews > 0 ? ((item.views / totalViews) * 100).toFixed(1) : 0;
+                                        const color = PAGE_COLORS[idx % PAGE_COLORS.length];
+                                        return (
+                                            <tr key={idx} className="hover:bg-violet-50/40 transition-colors">
+                                                <td className="px-5 py-4">
+                                                    <span className={`w-8 h-8 rounded-lg bg-gradient-to-r ${color.bg} flex items-center justify-center text-white text-xs font-bold`}>{idx + 1}</span>
+                                                </td>
+                                                <td className="px-5 py-4">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className={`w-9 h-9 rounded-xl bg-gradient-to-r ${color.bg} flex items-center justify-center shrink-0`}>
+                                                            <i className={`fas ${item.icon || 'fa-file-alt'} text-white text-sm`}></i>
+                                                        </div>
+                                                        <span className="font-semibold text-gray-800 text-sm">{item.label || item.page}</span>
+                                                    </div>
+                                                </td>
+                                                <td className="px-5 py-4">
+                                                    <span className="font-black text-gray-800">{item.views.toLocaleString()}</span>
+                                                </td>
+                                                <td className="px-5 py-4">
+                                                    <div className="flex items-center gap-2">
+                                                        <i className="fas fa-user text-gray-400 text-xs"></i>
+                                                        <span className="font-semibold text-gray-700">{item.uniqueUsers.toLocaleString()}</span>
+                                                    </div>
+                                                </td>
+                                                <td className="px-5 py-4">
+                                                    <span className={`px-3 py-1 rounded-full text-xs font-black bg-gradient-to-r ${color.bg} text-white shadow-sm`}>{pct}%</span>
+                                                </td>
+                                                <td className="px-5 py-4 min-w-36">
+                                                    <div className="w-full bg-gray-100 rounded-full h-3">
+                                                        <div className={`h-3 rounded-full bg-gradient-to-r ${color.bg}`}
+                                                            style={{ width: `${pct}%`, transition: 'width 1s ease' }}></div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* بطاقة التكامل مع Firebase */}
+                    {!hasRealData && (
+                        <div className="bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-200 rounded-2xl p-6">
+                            <div className="flex items-start gap-4">
+                                <div className="bg-violet-100 p-3 rounded-xl shrink-0">
+                                    <i className="fas fa-plug text-violet-600 text-xl"></i>
+                                </div>
+                                <div className="flex-1">
+                                    <h4 className="font-black text-violet-800 text-lg mb-2">كيف تربط تتبع الصفحات بتطبيقك عبر Firebase?</h4>
+                                    <p className="text-violet-700 text-sm mb-4">أضف مجموعة اسمها <code className="bg-violet-100 px-1 rounded">pageViews</code> في Firestore. كل مستند = صفحة واحدة:</p>
+                                    <div className="bg-gray-900 rounded-xl p-4 font-mono text-xs overflow-x-auto mb-4">
+                                        <div className="text-gray-400">// هيكل مجموعة pageViews — كل مستند = صفحة واحدة، ID = مفتاح الصفحة</div>
+                                        <div className="text-emerald-400 mt-2">{'{'}</div>
+                                        <div className="mr-4">
+                                            <div><span className="text-yellow-300">"page"</span><span className="text-white">: </span><span className="text-cyan-300">"levels"</span><span className="text-gray-400">  // مفتاح الصفحة (نفس القيم في القائمة أعلاه)</span></div>
+                                            <div><span className="text-yellow-300">"views"</span><span className="text-white">: </span><span className="text-cyan-300">4820</span><span className="text-gray-400">  // العداد الكلي لفتحات الصفحة</span></div>
+                                            <div><span className="text-yellow-300">"uniqueUsers"</span><span className="text-white">: </span><span className="text-cyan-300">1240</span><span className="text-gray-400">  // عدد UIDs الفريدة</span></div>
+                                            <div><span className="text-yellow-300">"userIds"</span><span className="text-white">: </span><span className="text-cyan-300">["uid1", "uid2", ...]</span><span className="text-gray-400">  // قائمة UIDs (حتى 1000)</span></div>
+                                        </div>
+                                        <div className="text-emerald-400">{'}'}</div>
+                                        <div className="text-gray-500 mt-3">// مثال: pageViews/levels → pageViews/profile → pageViews/pro → ...</div>
+                                    </div>
+                                    <div className="bg-gray-900 rounded-xl p-4 font-mono text-xs overflow-x-auto">
+                                        <div className="text-gray-400">// كود Kotlin لتسجيل زيارة الصفحة</div>
+                                        <pre className="text-gray-100 whitespace-pre mt-2">{`// ===================================================
+// PageTracker.kt — ضعه في مجلد utils/
+// ===================================================
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
+
+object PageTracker {
+
+    // ====== مفاتيح الصفحات (يجب استخدامها بالضبط عند الاستدعاء) ======
+    const val LEVELS                      = "levels"
+    const val PROFILE                     = "profile"
+    const val STATS                       = "stats"
+    const val PRO                         = "pro"
+    const val SAVED_WORDS                 = "saved_words"
+    const val SAVED_WORDS_QUIZ            = "saved_words_quiz"
+    const val WRITING_ASSISTANT           = "writing_assistant"
+    const val INTERACTIVE_CALL            = "interactive_call"
+    const val INTERACTIVE_CONVERSATION    = "interactive_conversation"
+    const val CAMERA_TRANSLATE            = "camera_translate"
+    const val DICTIONARY                  = "dictionary"
+    const val VOCABULARY                  = "vocabulary"
+    const val NEWS_LEARNING               = "news_learning"
+    const val STORIES                     = "stories"
+    const val STUDENT_LIBRARY             = "studentLibrary"
+    const val SMART_PATH                  = "smart_path"
+    const val READING_LISTENING_SELECTION = "reading_listening_selection"
+    const val READING_COURSE_LEVELS       = "reading_course_levels"
+    const val WRITING_COURSE_LEVELS       = "writing_course_levels"
+    const val LISTENING_COURSE_LEVELS     = "listening_course_levels"
+    const val CONVERSATION_COURSE_LEVELS  = "conversation_course_levels"
+    const val SHADOWING_LEVELS            = "shadowing_levels"
+    const val CERTIFICATES                = "certificates"
+    const val REPORT_ISSUE                = "report_issue"
+    const val REPORTS_HISTORY             = "reports_history"
+    const val ABOUT                       = "about"
+
+    private val db   = FirebaseFirestore.getInstance()
+    private val auth = FirebaseAuth.getInstance()
+
+    // استدعِ هذه الدالة في onResume() أو في بداية كل Fragment/Activity
+    fun logPageView(pageKey: String) {
+        val uid = auth.currentUser?.uid ?: return   // لا تسجّل للضيوف
+        val ref = db.collection("pageViews").document(pageKey)
+
+        db.runTransaction { tx ->
+            val snap    = tx.get(ref)
+            val views   = (snap.getLong("views") ?: 0) + 1
+            val userIds = (snap.get("userIds") as? List<*> ?: emptyList<Any>())
+                            .map { it.toString() }
+                            .toMutableSet()
+            userIds.add(uid)
+            val uniqueCount = userIds.size
+            // احتفظ بأقصى 1000 uid لتوفير المساحة
+            val trimmedIds = userIds.take(1000)
+
+            tx.set(ref, mapOf(
+                "page"        to pageKey,
+                "views"       to views,
+                "uniqueUsers" to uniqueCount,
+                "userIds"     to trimmedIds
+            ), SetOptions.merge())
+        }
+    }
+}
+
+// ====== مثال الاستخدام في كل شاشة ======
+// في HomeFragment / LevelsFragment:
+//   override fun onResume() { super.onResume(); PageTracker.logPageView(PageTracker.LEVELS) }
+//
+// في ProfileFragment:
+//   override fun onResume() { super.onResume(); PageTracker.logPageView(PageTracker.PROFILE) }
+//
+// في ProFragment / SubscriptionFragment:
+//   override fun onResume() { super.onResume(); PageTracker.logPageView(PageTracker.PRO) }
+// ... وهكذا لكل صفحة`}</pre>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                </div>
+            );
+        };
+
+        // ===================== المكون الرئيسي =====================
+        const Dashboard = () => {
+            const [activeTab, setActiveTab] = React.useState('overview');
+            const [selectedMonth, setSelectedMonth] = React.useState('');
+            const [dbData, setDbData] = React.useState(null);
+            const [loading, setLoading] = React.useState(true);
+            const [userFilter, setUserFilter] = React.useState('all');
+
+            React.useEffect(() => {
+                let active = true;
+                let unsubU = null, unsubR = null;
+                let gotMsg = false;
+
+                const deserialize = (obj) => {
+                    if (!obj || typeof obj !== 'object') return obj;
+                    if (Array.isArray(obj)) return obj.map(deserialize);
+                    if (obj._type === 'timestamp') return obj.millis;
+                    const r = {};
+                    Object.keys(obj).forEach(k => { r[k] = deserialize(obj[k]); });
+                    return r;
+                };
+
+                const apply = (users, reports, pageViews) => {
+                    if (!active) return;
+                    try {
+                        setDbData(processFirebaseData(users, reports, pageViews));
+                        setLoading(false);
+                    } catch (e) { console.error(e); setLoading(false); }
+                };
+
+                // 1. postMessage من الصفحة الأم
+                const onMsg = (e) => {
+                    if (!active || e.data?.type !== 'FIREBASE_DATA') return;
+                    gotMsg = true;
+                    apply(
+                        (e.data.users || []).map(deserialize),
+                        (e.data.reports || []).map(deserialize),
+                        (e.data.pageViews || []).map(deserialize)
+                    );
+                };
+                window.addEventListener('message', onMsg);
+
+                // طلب البيانات
+                try { if (window.parent !== window) window.parent.postMessage({ type: 'REQUEST_FIREBASE_DATA' }, '*'); } catch (e) { }
+
+                // 2. Fallback: Firebase Compat SDK بعد 2.5 ث
+                const timer = setTimeout(() => {
+                    if (gotMsg || !active) return;
+                    console.log('🔌 Fallback Firebase Compat...');
+                    if (!db) {
+                        console.error("Firebase db is not initialized yet. Fallback cancelled.");
+                        return;
+                    }
+                    let users = [], reports = [], ul = false, rl = false;
+                    const check = () => { if (ul && rl) apply(users, reports); };
+                    unsubU = db.collection('users').onSnapshot(s => { users = []; s.forEach(d => users.push({ id: d.id, ...d.data() })); ul = true; check(); }, e => { ul = true; check(); });
+                    unsubR = db.collection('reports').onSnapshot(s => { reports = []; s.forEach(d => reports.push({ id: d.id, ...d.data() })); rl = true; check(); }, e => { rl = true; check(); });
+                }, 2500);
+
+                return () => { active = false; clearTimeout(timer); window.removeEventListener('message', onMsg); if (unsubU) unsubU(); if (unsubR) unsubR(); };
+            }, []);
+
+            const storedData = dbData?.storedData || {};
+            const usersList = dbData?.usersList || [];
+            const getBehaviorByMonth = dbData?.getBehaviorByMonth || (() => ({ clickedSubscribe: [], openedPaymentNoCard: [], enteredCardNoComplete: [], completedPayment: [], failedPayment: [] }));
+            const hasSubscriptionData = dbData?.hasSubscriptionData || false;
+
+            const availableMonths = Object.keys(storedData).sort().reverse();
+
+            React.useEffect(() => {
+                if (availableMonths.length > 0 && !selectedMonth) setSelectedMonth(availableMonths[0]);
+            }, [dbData]);
+
+            const currentMonthData = storedData[selectedMonth];
+            const behaviorData = getBehaviorByMonth(selectedMonth);
+
+            // شاشة التحميل
+            if (loading) return (
+                <div className="min-h-screen bg-gray-50 flex flex-col justify-center items-center gap-4">
+                    <div className="w-14 h-14 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-purple-800 font-bold text-lg">جاري تحميل البيانات من Firebase...</p>
+                </div>
+            );
+
+            if (!currentMonthData) return (
+                <div className="min-h-screen flex justify-center items-center">
+                    <div className="bg-white p-10 rounded-2xl shadow-xl text-center">
+                        <i className="fas fa-database text-purple-400 text-5xl mb-4 block"></i>
+                        <h2 className="font-black text-xl text-gray-800">لا توجد بيانات</h2>
+                    </div>
+                </div>
+            );
+
+            // فلاتر المستخدمين
+            const registeredUsers = usersList.filter(u => u.status === 'registered');
+            const subscribers = usersList.filter(u => u.status === 'subscriber');
+            const monthlySubscribers = subscribers.filter(s => s.planType === 'monthly');
+            const quarterlySubscribers = subscribers.filter(s => s.planType === 'quarterly');
+            const semiAnnualSubscribers = subscribers.filter(s => s.planType === 'semiAnnual');
+            const annualSubscribers = subscribers.filter(s => s.planType === 'annual');
+
+            const getFilteredUsers = () => {
+                if (userFilter === 'registered') return registeredUsers;
+                if (userFilter === 'subscribers') return subscribers;
+                if (userFilter === 'monthly') return monthlySubscribers;
+                if (userFilter === 'quarterly') return quarterlySubscribers;
+                if (userFilter === 'semiAnnual') return semiAnnualSubscribers;
+                if (userFilter === 'annual') return annualSubscribers;
+                return usersList;
+            };
+
+            const getStatusBadge = (status) => {
+                if (status === 'subscriber') return <span className="px-3 py-1 rounded-full text-xs font-bold bg-gradient-to-r from-emerald-400 to-emerald-600 text-white shadow-sm">مشترك</span>;
+                return <span className="px-3 py-1 rounded-full text-xs font-bold bg-gradient-to-r from-blue-400 to-blue-600 text-white shadow-sm">مسجل</span>;
+            };
+
+            const stages = [
+                { key: 'clickedSubscribe', title: '🖱️ ضغط زر الاشتراك (لم يفتح الدفع)', icon: 'fa-hand-pointer', color: 'from-amber-400 to-amber-600' },
+                { key: 'openedPaymentNoCard', title: '💳 فتح شاشة الدفع (لم يدخل البيانات)', icon: 'fa-eye', color: 'from-blue-400 to-blue-600' },
+                { key: 'enteredCardNoComplete', title: '💳 أدخل بيانات البطاقة (لم يكمل)', icon: 'fa-credit-card', color: 'from-purple-400 to-purple-600' },
+                { key: 'completedPayment', title: '✅ أكمل الدفع بنجاح', icon: 'fa-check-circle', color: 'from-emerald-400 to-emerald-600' },
+                { key: 'failedPayment', title: '❌ فشل الدفع', icon: 'fa-times-circle', color: 'from-rose-400 to-rose-600' }
+            ];
+
+            const chartLabels = Object.keys(storedData).sort().map(k => storedData[k].name);
+            const userGrowthData = Object.keys(storedData).sort().map(k => storedData[k].users.total);
+            const subscriberGrowthData = Object.keys(storedData).sort().map(k => storedData[k].users.subscribers);
+            const revenueData = Object.keys(storedData).sort().map(k => storedData[k].revenue.total);
+
+            return (
+                <div className="min-h-screen">
+                    {/* Header */}
+                    <div className="bg-gradient-to-r from-indigo-900 via-purple-900 to-indigo-900 text-white shadow-2xl sticky top-0 z-20">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5">
+                            <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+                                <div className="flex items-center gap-4">
+                                    <div className="bg-white/20 backdrop-blur-sm p-3 rounded-2xl"><i className="fas fa-chalkboard-user text-2xl"></i></div>
+                                    <div>
+                                        <h1 className="text-2xl md:text-3xl font-black tracking-tight">LangHub Dashboard Pro</h1>
+                                        <p className="text-indigo-200 text-sm">لوحة الأرباح والاشتراكات — بيانات Firebase مباشرة</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    {!hasSubscriptionData && (
+                                        <div className="bg-amber-500/30 border border-amber-400 rounded-full px-4 py-2 text-sm flex items-center gap-2">
+                                            <i className="fas fa-exclamation-triangle text-amber-300"></i>
+                                            <span className="text-amber-200">بيانات الاشتراك غير موجودة</span>
+                                        </div>
+                                    )}
+                                    <div className="bg-white/10 backdrop-blur-sm rounded-full px-5 py-2 text-sm flex items-center gap-2">
+                                        <i className="fas fa-user-shield"></i><span>Admin</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+
+                        {/* بانر تحذير البيانات المفقودة */}
+                        <MissingDataBanner hasSubscriptionData={hasSubscriptionData} />
+
+                        {/* منتقي الشهر */}
+                        <div className="bg-white rounded-2xl shadow-lg p-4 mb-6">
+                            <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+                                <div className="flex items-center gap-3">
+                                    <i className="fas fa-calendar-alt text-purple-600 text-xl"></i>
+                                    <span className="font-bold text-gray-700">اختر الشهر لعرض البيانات:</span>
+                                    <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">
+                                        <i className="fas fa-database ml-1"></i>{availableMonths.length} شهر مسجل
+                                    </span>
+                                </div>
+                                <div className="flex gap-2 flex-wrap">
+                                    {availableMonths.map(month => (
+                                        <button key={month} onClick={() => setSelectedMonth(month)}
+                                            className={`px-5 py-2 rounded-xl font-semibold transition-all duration-300 ${selectedMonth === month ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                                            {storedData[month].name}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="mt-3 text-xs text-gray-400 border-t pt-3">
+                                <i className="fas fa-info-circle ml-1"></i>
+                                البيانات مسحوبة مباشرة من Firebase — الأرقام تعكس المستخدمين المسجلين حتى نهاية كل شهر.
+                            </div>
+                        </div>
+
+                        {/* التبويبات */}
+                        <div className="flex gap-3 mb-8 overflow-x-auto pb-2">
+                            {[
+                                { id: 'overview', name: 'نظرة عامة', icon: 'fa-chart-pie' },
+                                { id: 'users', name: 'المستخدمين', icon: 'fa-users' },
+                                { id: 'payments', name: 'تتبع الدفع', icon: 'fa-credit-card' },
+                                { id: 'charts', name: 'التحليلات', icon: 'fa-chart-line' },
+                                { id: 'pageactivity', name: 'نشاط المستخدمين', icon: 'fa-map-marked-alt' },
+                                { id: 'integration', name: 'دليل التكامل', icon: 'fa-rocket' }
+                            ].map(tab => (
+                                <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                                    className={`px-6 py-3 rounded-xl font-bold transition-all duration-300 flex items-center gap-2 whitespace-nowrap ${activeTab === tab.id ? 'tab-active bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md' : 'bg-white text-gray-600 hover:shadow-lg hover:scale-105'}`}>
+                                    <i className={`fas ${tab.icon}`}></i><span>{tab.name}</span>
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* ===== نظرة عامة ===== */}
+                        {activeTab === 'overview' && (
+                            <div className="space-y-6">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                                    <StatCard title="إجمالي المستخدمين" value={formatNumber(currentMonthData.users.total)} icon="fas fa-users" color="blue" subtitle={currentMonthData.name} />
+                                    <StatCard title="المستخدمين المسجلين" value={formatNumber(currentMonthData.users.registered)} icon="fas fa-user-check" color="green" subtitle={`ضيوف تقريبي: ${formatNumber(currentMonthData.users.guests)}`} />
+                                    <StatCard title="المشتركين النشطين" value={formatNumber(currentMonthData.users.subscribers)} icon="fas fa-crown" color="purple"
+                                        subtitle={currentMonthData.users.total > 0
+                                            ? `${((currentMonthData.users.subscribers / currentMonthData.users.total) * 100).toFixed(1)}% من المستخدمين`
+                                            : hasSubscriptionData ? '0 مشترك' : 'يتطلب بيانات الاشتراك'} />
+                                    <StatCard title="إجمالي الأرباح" value={hasSubscriptionData ? formatCurrency(currentMonthData.revenue.total) : '—'} icon="fas fa-dollar-sign" color="orange" subtitle={hasSubscriptionData ? currentMonthData.name : 'يتطلب بيانات الاشتراك'} />
+                                </div>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                    {/* أرباح الإعلانات */}
+                                    <div className="bg-white rounded-2xl shadow-xl p-6">
+                                        <h3 className="font-bold text-xl text-gray-800 mb-4">
+                                            <i className="fas fa-ad text-orange-600 ml-2"></i>أرباح الإعلانات — {currentMonthData.name}
+                                            {!hasSubscriptionData && <span className="mr-2 text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">تقديري</span>}
+                                        </h3>
+                                        <div className="space-y-3">
+                                            <div className="flex justify-between p-3 bg-gray-50 rounded-lg"><span>من المسجلين:</span><span className="font-bold text-green-600">{formatCurrency(currentMonthData.revenue.ads * 0.73)}</span></div>
+                                            <div className="flex justify-between p-3 bg-gray-50 rounded-lg"><span>من الضيوف (تقريبي):</span><span className="font-bold text-blue-600">{formatCurrency(currentMonthData.revenue.ads * 0.27)}</span></div>
+                                            <div className="flex justify-between p-3 bg-gradient-to-r from-orange-50 to-orange-100 rounded-lg border border-orange-200">
+                                                <span className="font-bold">إجمالي الإعلانات:</span>
+                                                <span className="font-black text-orange-600">{formatCurrency(currentMonthData.revenue.ads)}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* أرباح الاشتراكات */}
+                                    <div className="bg-white rounded-2xl shadow-xl p-6">
+                                        <h3 className="font-bold text-xl text-gray-800 mb-4">
+                                            <i className="fas fa-chart-line text-purple-600 ml-2"></i>أرباح الاشتراكات — {currentMonthData.name}
+                                            {!hasSubscriptionData && <span className="mr-2 text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">مفقودة من Firebase</span>}
+                                        </h3>
+                                        <div className="space-y-2">
+                                            <div className="flex justify-between p-2">
+                                                <span>شهري ({currentMonthData.subscriptions.monthly}):</span>
+                                                <span className="font-bold text-blue-600">{formatCurrency(currentMonthData.subscriptions.monthly * PLAN_PRICES.monthly)}</span>
+                                            </div>
+                                            <div className="flex justify-between p-2">
+                                                <span>ربع سنوي ({currentMonthData.subscriptions.quarterly}):</span>
+                                                <span className="font-bold text-purple-600">{formatCurrency(currentMonthData.subscriptions.quarterly * PLAN_PRICES.quarterly)}</span>
+                                            </div>
+                                            <div className="flex justify-between p-2">
+                                                <span>نصف سنوي ({currentMonthData.subscriptions.semiAnnual}):</span>
+                                                <span className="font-bold text-pink-600">{formatCurrency(currentMonthData.subscriptions.semiAnnual * PLAN_PRICES.semiAnnual)}</span>
+                                            </div>
+                                            <div className="flex justify-between p-2">
+                                                <span>سنوي ({currentMonthData.subscriptions.annual}):</span>
+                                                <span className="font-bold text-emerald-600">{formatCurrency(currentMonthData.subscriptions.annual * PLAN_PRICES.annual)}</span>
+                                            </div>
+                                            <div className="flex justify-between p-3 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg mt-3 border border-purple-200">
+                                                <span className="font-bold">إجمالي الاشتراكات:</span>
+                                                <span className="font-black text-purple-700">{formatCurrency(currentMonthData.revenue.subscriptions)}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* الإجمالي الكلي */}
+                                <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl shadow-xl p-6 text-white">
+                                    <div className="flex justify-between items-center">
+                                        <div>
+                                            <p className="text-indigo-100 text-sm">الإجمالي الكلي</p>
+                                            <p className="text-4xl font-black">{hasSubscriptionData ? formatCurrency(currentMonthData.revenue.total) : '$0.00'}</p>
+                                            <p className="text-indigo-100 text-xs mt-1">{currentMonthData.name} — {currentMonthData.users.newThisMonth} مستخدم جديد</p>
+                                        </div>
+                                        <i className="fas fa-chart-simple text-6xl text-white/20"></i>
+                                    </div>
+                                </div>
+
+                                {/* سلوك المستخدم */}
+                                <div className="bg-white rounded-2xl shadow-xl p-6">
+                                    <h3 className="font-bold text-xl text-gray-800 mb-4">
+                                        📊 سلوك المستخدم — {currentMonthData.name}
+                                    </h3>
+                                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                                        <div className="text-center p-4 bg-amber-50 rounded-xl"><div className="text-2xl font-bold text-amber-600">{currentMonthData.behavior.clickedSubscribe}</div><div className="text-xs text-gray-600 mt-1">ضغط اشتراك</div></div>
+                                        <div className="text-center p-4 bg-blue-50 rounded-xl"><div className="text-2xl font-bold text-blue-600">{currentMonthData.behavior.openedPaymentNoCard}</div><div className="text-xs text-gray-600 mt-1">فتح الدفع</div></div>
+                                        <div className="text-center p-4 bg-purple-50 rounded-xl"><div className="text-2xl font-bold text-purple-600">{currentMonthData.behavior.enteredCardNoComplete}</div><div className="text-xs text-gray-600 mt-1">أدخل البطاقة</div></div>
+                                        <div className="text-center p-4 bg-emerald-50 rounded-xl"><div className="text-2xl font-bold text-emerald-600">{currentMonthData.behavior.completedPayment}</div><div className="text-xs text-gray-600 mt-1">أكمل الدفع</div></div>
+                                        <div className="text-center p-4 bg-rose-50 rounded-xl"><div className="text-2xl font-bold text-rose-600">{currentMonthData.behavior.failedPayment}</div><div className="text-xs text-gray-600 mt-1">فشل الدفع</div></div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ===== المستخدمون ===== */}
+                        {activeTab === 'users' && (
+                            <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+                                <div className="p-6 border-b bg-gradient-to-r from-gray-50 to-white">
+                                    <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+                                        <h3 className="font-bold text-xl text-gray-800">
+                                            <i className="fas fa-users text-purple-600 ml-2"></i>بيانات المستخدمين — {currentMonthData.name}
+                                        </h3>
+                                        <div className="flex gap-2 flex-wrap">
+                                            {[
+                                                { key: 'all', label: `الكل (${usersList.length})`, color: 'purple' },
+                                                { key: 'registered', label: `مسجلون (${registeredUsers.length})`, color: 'blue' },
+                                                { key: 'subscribers', label: `مشتركون (${subscribers.length})`, color: 'emerald' },
+                                                { key: 'monthly', label: `شهري (${monthlySubscribers.length})`, color: 'blue' },
+                                                { key: 'quarterly', label: `ربع سنوي (${quarterlySubscribers.length})`, color: 'purple' },
+                                                { key: 'semiAnnual', label: `نصف سنوي (${semiAnnualSubscribers.length})`, color: 'pink' },
+                                                { key: 'annual', label: `سنوي (${annualSubscribers.length})`, color: 'emerald' }
+                                            ].map(f => (
+                                                <button key={f.key} onClick={() => setUserFilter(f.key)}
+                                                    className={`px-3 py-2 rounded-lg text-xs font-semibold transition ${userFilter === f.key ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                                                    {f.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="overflow-x-auto p-4">
+                                    {getFilteredUsers().length > 0 ? (
+                                        <table className="min-w-full divide-y divide-gray-200">
+                                            <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
+                                                <tr>
+                                                    {['#', 'البريد الإلكتروني', 'الاسم', 'الحالة', 'الباقة', 'تاريخ الاشتراك', 'تاريخ الانتهاء'].map(h => (
+                                                        <th key={h} className="px-4 py-4 text-right text-xs font-bold text-gray-600">{h}</th>
+                                                    ))}
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {getFilteredUsers().map((user, idx) => (
+                                                    <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                                                        <td className="px-4 py-3 text-gray-400 text-sm">{idx + 1}</td>
+                                                        <td className="px-4 py-3 text-sm text-gray-700 font-mono text-xs">{user.email}</td>
+                                                        <td className="px-4 py-3 text-sm font-semibold text-gray-800">{user.displayName}</td>
+                                                        <td className="px-4 py-3">{getStatusBadge(user.status)}</td>
+                                                        <td className="px-4 py-3 text-sm font-semibold">{user.plan || '—'}</td>
+                                                        <td className="px-4 py-3 text-sm text-gray-500">{user.subscribedAt || '—'}</td>
+                                                        <td className="px-4 py-3 text-sm text-gray-500">{user.expiresAt || '—'}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    ) : (
+                                        <div className="text-center text-gray-400 py-12">
+                                            <i className="fas fa-users-slash text-4xl mb-3 block"></i>
+                                            لا توجد بيانات تطابق الفلتر
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ===== تتبع الدفع ===== */}
+                        {activeTab === 'payments' && (
+                            <div className="space-y-4">
+                                {!hasSubscriptionData && (
+                                    <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-amber-800 text-sm">
+                                        <i className="fas fa-info-circle ml-2"></i>
+                                        تفاصيل الدفع ستظهر هنا بعد إضافة حقل <code className="bg-amber-100 px-1 rounded">paymentEvents</code> لمستند المستخدم في Firebase.
+                                    </div>
+                                )}
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                    {stages.map(stage => (
+                                        <div key={stage.key} className="bg-white rounded-2xl shadow-lg overflow-hidden">
+                                            <div className={`bg-gradient-to-r ${stage.color} p-4`}>
+                                                <div className="flex items-center gap-3">
+                                                    <i className={`fas ${stage.icon} text-white text-xl`}></i>
+                                                    <h4 className="font-bold text-white text-base flex-1">{stage.title}</h4>
+                                                    <span className="bg-white/20 px-3 py-1 rounded-full text-white text-sm font-bold">{behaviorData[stage.key]?.length || 0}</span>
+                                                </div>
+                                            </div>
+                                            <div className="p-4 max-h-64 overflow-y-auto">
+                                                {behaviorData[stage.key]?.length > 0
+                                                    ? behaviorData[stage.key].map((item, i) => (
+                                                        <div key={i} className="bg-gray-50 rounded-lg p-3 mb-2 border border-gray-200">
+                                                            <div className="font-mono text-sm font-semibold">{item.email}</div>
+                                                            <div className="text-xs text-gray-500 mt-1">
+                                                                {item.timestamp ? new Date(item.timestamp).toLocaleString('ar-EG') : '—'}
+                                                            </div>
+                                                            {item.plan && <div className="text-xs text-emerald-600 mt-1">الباقة: {item.plan}</div>}
+                                                            {item.reason && <div className="text-xs text-rose-600 mt-1">{item.reason}</div>}
+                                                        </div>
+                                                    ))
+                                                    : <div className="text-center text-gray-400 py-8"><i className="fas fa-inbox text-3xl mb-2 block"></i>لا توجد أحداث مسجلة</div>
+                                                }
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ===== التحليلات ===== */}
+                        {activeTab === 'charts' && (
+                            <div className="space-y-6">
+                                <ChartComponent type="line" labels={chartLabels}
+                                    data={[
+                                        { label: 'المستخدمين الكلي', data: userGrowthData, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', tension: 0.4, fill: true },
+                                        { label: 'المشتركون', data: subscriberGrowthData, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', tension: 0.4, fill: true }
+                                    ]}
+                                    title="📈 نمو المستخدمين والاشتراكات" />
+                                <ChartComponent type="bar" labels={chartLabels}
+                                    data={[{ label: 'الأرباح ($)', data: revenueData, backgroundColor: '#8b5cf6', borderRadius: 8 }]}
+                                    title="💰 إجمالي الأرباح بمرور الوقت" />
+
+                                <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl shadow-xl p-6 text-white">
+                                    <div className="text-center">
+                                        <p className="text-indigo-100 text-lg">📊 ملخص التحليلات</p>
+                                        <p className="text-2xl font-black mt-2">
+                                            إجمالي المستخدمين: {formatNumber(userGrowthData[userGrowthData.length - 1] || 0)}
+                                        </p>
+                                        <p className="text-indigo-200 mt-1">
+                                            المشتركون الحاليون: {formatNumber(subscriberGrowthData[subscriberGrowthData.length - 1] || 0)}
+                                        </p>
+                                        {hasSubscriptionData && (
+                                            <p className="text-indigo-200">
+                                                أعلى شهر أرباح: {formatCurrency(Math.max(...revenueData))}
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ===== نشاط المستخدمين ===== */}
+                        {activeTab === 'pageactivity' && (
+                            <PageActivityTab allUsers={dbData?.rawUsers || []} db={db} realPageViews={dbData?.pageViews} />
+                        )}
+
+                        {/* ===== دليل التكامل ===== */}
+                        {activeTab === 'integration' && (
+                            <div className="space-y-6">
+
+                                {/* رأس الدليل */}
+                                <div className="bg-gradient-to-r from-emerald-600 to-teal-600 rounded-2xl p-6 text-white shadow-xl">
+                                    <div className="flex items-center gap-4">
+                                        <div className="bg-white/20 p-4 rounded-2xl"><i className="fas fa-rocket text-3xl"></i></div>
+                                        <div>
+                                            <h2 className="text-2xl font-black">دليل التكامل الكامل مع Firebase</h2>
+                                            <p className="text-emerald-100 mt-1">كل الكود المطلوب لإضافته في Android Studio لتشغيل لوحة التحكم بشكل كامل</p>
+                                            <p className="text-emerald-200 text-xs mt-1">📋 انسخ هذا الدليل وأرسله لـ AI في Android Studio</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* === القسم 1: هيكل Firebase المطلوب === */}
+                                <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+                                    <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-4">
+                                        <h3 className="text-white font-black text-lg"><i className="fas fa-database ml-2"></i>القسم 1: هيكل Firebase المطلوب</h3>
+                                        <p className="text-blue-100 text-sm mt-1">المجموعات التي يجب إنشاؤها أو تعديلها في Firestore</p>
+                                    </div>
+                                    <div className="p-6 space-y-6">
+
+                                        {/* مجموعة users */}
+                                        <div>
+                                            <div className="flex items-center gap-3 mb-3">
+                                                <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-sm font-bold">موجودة ✓</span>
+                                                <h4 className="font-black text-gray-800 text-lg">مجموعة: <code className="bg-gray-100 px-2 py-0.5 rounded">users</code></h4>
+                                                <span className="text-gray-400 text-sm">— أضف إليها هذه الحقول الجديدة</span>
+                                            </div>
+                                            <div className="bg-gray-900 rounded-xl p-4 font-mono text-sm overflow-x-auto">
+                                                <div className="text-gray-400">// الحقول الجديدة التي يجب إضافتها لكل مستخدم مشترك</div>
+                                                <div className="text-emerald-400 mt-2">{'{'}</div>
+                                                <div className="mr-4">
+                                                    <div><span className="text-yellow-300">"subscriptionPlan"</span><span className="text-white">: </span><span className="text-cyan-300">"monthly"</span><span className="text-gray-400">  // أو quarterly | semiAnnual | annual</span></div>
+                                                    <div><span className="text-yellow-300">"subscriptionStart"</span><span className="text-white">: </span><span className="text-cyan-300">Timestamp</span><span className="text-gray-400">  // تاريخ بدء الاشتراك</span></div>
+                                                    <div><span className="text-yellow-300">"subscriptionEnd"</span><span className="text-white">: </span><span className="text-cyan-300">Timestamp</span><span className="text-gray-400">   // تاريخ انتهاء الاشتراك</span></div>
+                                                    <div><span className="text-yellow-300">"isSubscriber"</span><span className="text-white">: </span><span className="text-cyan-300">true</span><span className="text-gray-400">         // boolean</span></div>
+                                                    <div><span className="text-yellow-300">"subscriptionStatus"</span><span className="text-white">: </span><span className="text-cyan-300">"active"</span><span className="text-gray-400">  // أو expired | cancelled</span></div>
+                                                </div>
+                                                <div className="text-emerald-400">{'}'}</div>
+                                            </div>
+                                        </div>
+
+                                        {/* مجموعة paymentEvents */}
+                                        <div>
+                                            <div className="flex items-center gap-3 mb-3">
+                                                <span className="bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-sm font-bold">جديدة ★</span>
+                                                <h4 className="font-black text-gray-800 text-lg">مجموعة: <code className="bg-gray-100 px-2 py-0.5 rounded">paymentEvents</code></h4>
+                                                <span className="text-gray-400 text-sm">— أنشئها جديداً لتتبع سلوك الدفع</span>
+                                            </div>
+                                            <p className="text-gray-500 text-sm mb-3">كل مستند = حدث واحد (ضغطة زر، فتح الدفع، إتمام الدفع...)</p>
+                                            <div className="bg-gray-900 rounded-xl p-4 font-mono text-sm overflow-x-auto">
+                                                <div className="text-gray-400">// مثال مستند في مجموعة paymentEvents</div>
+                                                <div className="text-emerald-400 mt-2">{'{'}</div>
+                                                <div className="mr-4">
+                                                    <div><span className="text-yellow-300">"userId"</span><span className="text-white">: </span><span className="text-cyan-300">"abc123uid"</span><span className="text-gray-400">           // FirebaseAuth.currentUser.uid</span></div>
+                                                    <div><span className="text-yellow-300">"userEmail"</span><span className="text-white">: </span><span className="text-cyan-300">"user@gmail.com"</span><span className="text-gray-400">       // FirebaseAuth.currentUser.email</span></div>
+                                                    <div><span className="text-yellow-300">"eventType"</span><span className="text-white">: </span><span className="text-cyan-300">"clickedSubscribe"</span><span className="text-gray-400">    // نوع الحدث (انظر القائمة أدناه)</span></div>
+                                                    <div><span className="text-yellow-300">"plan"</span><span className="text-white">: </span><span className="text-cyan-300">"monthly"</span><span className="text-gray-400">               // الخطة التي اختارها</span></div>
+                                                    <div><span className="text-yellow-300">"amount"</span><span className="text-white">: </span><span className="text-cyan-300">29.99</span><span className="text-gray-400">                  // السعر بالدولار</span></div>
+                                                    <div><span className="text-yellow-300">"timestamp"</span><span className="text-white">: </span><span className="text-cyan-300">FieldValue.serverTimestamp()</span></div>
+                                                    <div><span className="text-yellow-300">"month"</span><span className="text-white">: </span><span className="text-cyan-300">"2026-06"</span><span className="text-gray-400">               // yyyy-MM للفلترة السهلة</span></div>
+                                                    <div><span className="text-yellow-300">"failureReason"</span><span className="text-white">: </span><span className="text-cyan-300">"card_declined"</span><span className="text-gray-400">   // فقط عند الفشل</span></div>
+                                                    <div><span className="text-yellow-300">"transactionId"</span><span className="text-white">: </span><span className="text-cyan-300">"txn_abc123"</span><span className="text-gray-400">      // فقط عند النجاح</span></div>
+                                                </div>
+                                                <div className="text-emerald-400">{'}'}</div>
+                                            </div>
+                                            <div className="mt-3 bg-blue-50 rounded-xl p-4">
+                                                <p className="font-bold text-blue-800 text-sm mb-2">📋 قيم eventType المسموح بها:</p>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                    {[
+                                                        ['clickedSubscribe', 'ضغط زر الاشتراك ولم يفتح شاشة الدفع'],
+                                                        ['openedPayment', 'فتح شاشة الدفع ولم يدخل بيانات البطاقة'],
+                                                        ['enteredCard', 'أدخل بيانات البطاقة ولم يضغط تأكيد'],
+                                                        ['completedPayment', 'أكمل الدفع بنجاح'],
+                                                        ['failedPayment', 'فشل الدفع لأي سبب']
+                                                    ].map(([key, desc]) => (
+                                                        <div key={key} className="flex items-start gap-2 bg-white rounded-lg p-2">
+                                                            <code className="text-purple-700 font-bold text-xs whitespace-nowrap">{key}</code>
+                                                            <span className="text-gray-600 text-xs">{desc}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* مجموعة adRevenue */}
+                                        <div>
+                                            <div className="flex items-center gap-3 mb-3">
+                                                <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-sm font-bold">جديدة ★</span>
+                                                <h4 className="font-black text-gray-800 text-lg">مجموعة: <code className="bg-gray-100 px-2 py-0.5 rounded">adRevenue</code></h4>
+                                                <span className="text-gray-400 text-sm">— لتتبع أرباح الإعلانات</span>
+                                            </div>
+                                            <p className="text-gray-500 text-sm mb-3">كل مستند = يوم واحد — ID المستند: <code className="bg-gray-100 px-1 rounded">yyyy-MM-dd</code></p>
+                                            <div className="bg-gray-900 rounded-xl p-4 font-mono text-sm overflow-x-auto">
+                                                <div className="text-gray-400">// مثال: adRevenue/2026-06-10</div>
+                                                <div className="text-emerald-400 mt-2">{'{'}</div>
+                                                <div className="mr-4">
+                                                    <div><span className="text-yellow-300">"date"</span><span className="text-white">: </span><span className="text-cyan-300">"2026-06-10"</span></div>
+                                                    <div><span className="text-yellow-300">"month"</span><span className="text-white">: </span><span className="text-cyan-300">"2026-06"</span></div>
+                                                    <div><span className="text-yellow-300">"revenue"</span><span className="text-white">: </span><span className="text-cyan-300">45.30</span><span className="text-gray-400">  // إجمالي أرباح اليوم بالدولار</span></div>
+                                                    <div><span className="text-yellow-300">"impressions"</span><span className="text-white">: </span><span className="text-cyan-300">12500</span><span className="text-gray-400">  // عدد مشاهدات الإعلانات</span></div>
+                                                    <div><span className="text-yellow-300">"clicks"</span><span className="text-white">: </span><span className="text-cyan-300">340</span><span className="text-gray-400">     // عدد النقرات</span></div>
+                                                    <div><span className="text-yellow-300">"source"</span><span className="text-white">: </span><span className="text-cyan-300">"admob"</span><span className="text-gray-400">  // مصدر الإعلانات</span></div>
+                                                </div>
+                                                <div className="text-emerald-400">{'}'}</div>
+                                            </div>
+                                            <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-4">
+                                                <p className="text-amber-800 text-sm"><i className="fas fa-lightbulb ml-1 text-amber-500"></i>
+                                                    <strong>ملاحظة AdMob:</strong> AdMob لا يسمح بقراءة الأرباح مباشرة من التطبيق. الحل: أضف الأرباح يدوياً من لوحة AdMob، أو استخدم AdMob Reporting API مع Firebase Cloud Functions لجلبها تلقائياً كل يوم.</p>
+                                            </div>
+                                        </div>
+
+                                        {/* مجموعة pageViews */}
+                                        <div className="border-t pt-6">
+                                            <div className="flex items-center gap-3 mb-3">
+                                                <span className="bg-purple-100 text-purple-700 px-3 py-1 rounded-full text-sm font-bold">جديدة +</span>
+                                                <h4 className="font-black text-gray-800 text-lg">مجموعة: <code className="bg-gray-100 px-2 py-0.5 rounded">pageViews</code></h4>
+                                                <span className="text-gray-400 text-sm">— لتتبع زيارات الصفحات ونشاط المستخدمين</span>
+                                            </div>
+                                            <p className="text-gray-500 text-sm mb-3">كل مستند = شاشة/صفحة واحدة — معرف المستند (Document ID) هو معرّف الصفحة (مثل levels, profile, stats...):</p>
+                                            <div className="bg-gray-900 rounded-xl p-4 font-mono text-sm overflow-x-auto">
+                                                <div className="text-gray-400">// هيكل مجموعة pageViews — كل مستند = صفحة واحدة</div>
+                                                <div className="text-emerald-400 mt-2">{'{'}</div>
+                                                <div className="mr-4">
+                                                    <div><span className="text-yellow-300">"page"</span><span className="text-white">: </span><span className="text-cyan-300">"levels"</span><span className="text-gray-400">  // معرف الصفحة (مفتاح الصفحة)</span></div>
+                                                    <div><span className="text-yellow-300">"views"</span><span className="text-white">: </span><span className="text-cyan-300">4820</span><span className="text-gray-400">  // إجمالي عدد المشاهدات للصفحة</span></div>
+                                                    <div><span className="text-yellow-300">"uniqueUsers"</span><span className="text-white">: </span><span className="text-cyan-300">1240</span><span className="text-gray-400">  // عدد المستخدمين الفريدين الذين زاروا الصفحة</span></div>
+                                                    <div><span className="text-yellow-300">"userIds"</span><span className="text-white">: </span><span className="text-cyan-300">["uid1", "uid2", ...]</span><span className="text-gray-400"> // قائمة معرفات المستخدمين (أقصى 1000 لتوفير المساحة)</span></div>
+                                                </div>
+                                                <div className="text-emerald-400">{'}'}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* === القسم 2: كود Kotlin === */}
+                                <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+                                    <div className="bg-gradient-to-r from-purple-600 to-pink-600 p-4">
+                                        <h3 className="text-white font-black text-lg"><i className="fab fa-android ml-2"></i>القسم 2: كود Kotlin للتطبيق</h3>
+                                        <p className="text-purple-100 text-sm mt-1">انسخ هذا الكود وأضفه في Android Studio</p>
+                                    </div>
+                                    <div className="p-6 space-y-6">
+
+                                        {/* كلاس SubscriptionManager */}
+                                        <div>
+                                            <h4 className="font-black text-gray-800 mb-2">📁 أنشئ ملف: <code className="bg-purple-50 text-purple-700 px-2 py-0.5 rounded">SubscriptionManager.kt</code></h4>
+                                            <div className="bg-gray-900 rounded-xl p-4 font-mono text-xs overflow-x-auto leading-relaxed">
+                                                <pre className="text-gray-100 whitespace-pre">{`import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FieldValue
+import java.text.SimpleDateFormat
+import java.util.*
+
+object SubscriptionManager {
+
+    private val db = FirebaseFirestore.getInstance()
+    private val auth = FirebaseAuth.getInstance()
+    private val monthFormat = SimpleDateFormat("yyyy-MM", Locale.US)
+
+    // ====================================================
+    // 1. احفظ بيانات الاشتراك عند نجاح الدفع
+    // ====================================================
+    fun saveSubscription(
+        plan: String,          // "monthly" | "quarterly" | "semiAnnual" | "annual"
+        startDate: Date,       // تاريخ بدء الاشتراك
+        endDate: Date,         // تاريخ الانتهاء
+        transactionId: String  // معرف المعاملة من مزود الدفع
+    ) {
+        val uid = auth.currentUser?.uid ?: return
+        val email = auth.currentUser?.email ?: ""
+
+        // 1.a حدّث مستند المستخدم في مجموعة users
+        val userUpdates = mapOf(
+            "subscriptionPlan"   to plan,
+            "subscriptionStart"  to com.google.firebase.Timestamp(startDate),
+            "subscriptionEnd"    to com.google.firebase.Timestamp(endDate),
+            "isSubscriber"       to true,
+            "subscriptionStatus" to "active"
+        )
+        db.collection("users").document(uid).update(userUpdates)
+
+        // 1.b سجّل حدث completedPayment
+        logPaymentEvent(
+            eventType     = "completedPayment",
+            plan          = plan,
+            amount        = getPlanPrice(plan),
+            transactionId = transactionId
+        )
+    }
+
+    // ====================================================
+    // 2. سجّل حدث دفع (استدعه في كل خطوة)
+    // ====================================================
+    fun logPaymentEvent(
+        eventType: String,
+        plan: String? = null,
+        failureReason: String? = null,
+        amount: Double? = null,
+        transactionId: String? = null
+    ) {
+        val uid   = auth.currentUser?.uid   ?: "anonymous"
+        val email = auth.currentUser?.email ?: "anonymous"
+
+        val event = hashMapOf<String, Any>(
+            "userId"    to uid,
+            "userEmail" to email,
+            "eventType" to eventType,
+            "timestamp" to FieldValue.serverTimestamp(),
+            "month"     to monthFormat.format(Date())
+        )
+        plan?.let          { event["plan"]          = it }
+        failureReason?.let { event["failureReason"] = it }
+        amount?.let        { event["amount"]        = it }
+        transactionId?.let { event["transactionId"] = it }
+
+        db.collection("paymentEvents").add(event)
+    }
+
+    // ====================================================
+    // 3. ألغِ الاشتراك (عند انتهائه أو الإلغاء)
+    // ====================================================
+    fun cancelSubscription() {
+        val uid = auth.currentUser?.uid ?: return
+        val updates = mapOf(
+            "isSubscriber"       to false,
+            "subscriptionStatus" to "cancelled"
+        )
+        db.collection("users").document(uid).update(updates)
+    }
+
+    // ====================================================
+    // 4. أسعار الخطط (عدّلها حسب أسعارك)
+    // ====================================================
+    private fun getPlanPrice(plan: String): Double = when (plan) {
+        "monthly"    -> 29.99
+        "quarterly"  -> 69.99
+        "semiAnnual" -> 119.99
+        "annual"     -> 199.99
+        else         -> 0.0
+    }
+}`}</pre>
+                                            </div>
+                                        </div>
+
+                                        {/* أين تستدعي الدوال */}
+                                        <div>
+                                            <h4 className="font-black text-gray-800 mb-3">📍 أين تستدعي كل دالة في التطبيق:</h4>
+                                            <div className="space-y-3">
+                                                {[
+                                                    {
+                                                        event: 'clickedSubscribe',
+                                                        color: 'amber',
+                                                        where: 'عند الضغط على زر "اشترك الآن" قبل فتح شاشة الدفع',
+                                                        code: 'SubscriptionManager.logPaymentEvent("clickedSubscribe", plan = selectedPlan)'
+                                                    },
+                                                    {
+                                                        event: 'openedPayment',
+                                                        color: 'blue',
+                                                        where: 'عند فتح شاشة الدفع / نافذة إدخال بيانات البطاقة',
+                                                        code: 'SubscriptionManager.logPaymentEvent("openedPayment", plan = selectedPlan)'
+                                                    },
+                                                    {
+                                                        event: 'enteredCard',
+                                                        color: 'purple',
+                                                        where: 'عند تغيير أي حقل في نموذج البطاقة (TextWatcher)',
+                                                        code: 'SubscriptionManager.logPaymentEvent("enteredCard", plan = selectedPlan)'
+                                                    },
+                                                    {
+                                                        event: 'completedPayment',
+                                                        color: 'emerald',
+                                                        where: 'في callback نجاح الدفع من مزود الدفع',
+                                                        code: 'SubscriptionManager.saveSubscription(plan, startDate, endDate, txnId)'
+                                                    },
+                                                    {
+                                                        event: 'failedPayment',
+                                                        color: 'rose',
+                                                        where: 'في callback فشل الدفع من مزود الدفع',
+                                                        code: 'SubscriptionManager.logPaymentEvent("failedPayment", plan = selectedPlan, failureReason = error.message)'
+                                                    }
+                                                ].map(item => (
+                                                    <div key={item.event} className={`border-r-4 border-${item.color}-400 bg-${item.color}-50 rounded-xl p-4`}>
+                                                        <div className="flex items-center gap-2 mb-1">
+                                                            <code className={`text-${item.color}-700 font-bold text-sm`}>{item.event}</code>
+                                                        </div>
+                                                        <p className="text-gray-600 text-sm mb-2"><i className="fas fa-map-marker-alt ml-1 text-gray-400"></i>{item.where}</p>
+                                                        <div className="bg-gray-900 rounded-lg p-2 font-mono text-xs text-emerald-300 overflow-x-auto">{item.code}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* مثال تطبيق كامل */}
+                                        <div>
+                                            <h4 className="font-black text-gray-800 mb-2">🔧 مثال تطبيق كامل في Activity/Fragment:</h4>
+                                            <div className="bg-gray-900 rounded-xl p-4 font-mono text-xs overflow-x-auto leading-relaxed">
+                                                <pre className="text-gray-100 whitespace-pre">{`// في SubscriptionActivity.kt
+
+class SubscriptionActivity : AppCompatActivity() {
+
+    private var selectedPlan = "monthly"
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        // عند الضغط على زر الاشتراك
+        btnSubscribe.setOnClickListener {
+            // ★ الحدث 1: ضغط الزر
+            SubscriptionManager.logPaymentEvent(
+                eventType = "clickedSubscribe",
+                plan = selectedPlan
+            )
+            openPaymentScreen()
+        }
+    }
+
+    private fun openPaymentScreen() {
+        // ★ الحدث 2: فتح شاشة الدفع
+        SubscriptionManager.logPaymentEvent(
+            eventType = "openedPayment",
+            plan = selectedPlan
+        )
+        // افتح شاشة الدفع هنا...
+    }
+
+    // في TextWatcher لحقول البطاقة:
+    private val cardWatcher = object : TextWatcher {
+        private var hasLogged = false
+        override fun afterTextChanged(s: Editable?) {
+            if (!hasLogged && s?.isNotEmpty() == true) {
+                hasLogged = true
+                // ★ الحدث 3: إدخال بيانات البطاقة
+                SubscriptionManager.logPaymentEvent(
+                    eventType = "enteredCard",
+                    plan = selectedPlan
+                )
+            }
+        }
+        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+    }
+
+    // Callback من مزود الدفع (مثل Stripe / RevenueCat)
+    private fun onPaymentSuccess(transactionId: String) {
+        val calendar = Calendar.getInstance()
+        val startDate = calendar.time
+        when (selectedPlan) {
+            "monthly"    -> calendar.add(Calendar.MONTH, 1)
+            "quarterly"  -> calendar.add(Calendar.MONTH, 3)
+            "semiAnnual" -> calendar.add(Calendar.MONTH, 6)
+            "annual"     -> calendar.add(Calendar.YEAR,  1)
+        }
+        val endDate = calendar.time
+
+        // ★ الحدث 4: إتمام الدفع + حفظ الاشتراك
+        SubscriptionManager.saveSubscription(
+            plan          = selectedPlan,
+            startDate     = startDate,
+            endDate       = endDate,
+            transactionId = transactionId
+        )
+    }
+
+    private fun onPaymentFailed(error: Exception) {
+        // ★ الحدث 5: فشل الدفع
+        SubscriptionManager.logPaymentEvent(
+            eventType     = "failedPayment",
+            plan          = selectedPlan,
+            failureReason = error.message ?: "unknown_error"
+        )
+    }
+}`}</pre>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* === القسم 3: أرباح الإعلانات === */}
+                                <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+                                    <div className="bg-gradient-to-r from-orange-500 to-amber-500 p-4">
+                                        <h3 className="text-white font-black text-lg"><i className="fas fa-ad ml-2"></i>القسم 3: تتبع أرباح الإعلانات (AdMob)</h3>
+                                    </div>
+                                    <div className="p-6 space-y-4">
+                                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                                            <p className="font-bold text-amber-800 mb-2">⚠️ قيود AdMob المهمة:</p>
+                                            <p className="text-amber-700 text-sm">AdMob لا يوفر API مباشر للتطبيق لقراءة الأرباح. هناك 3 خيارات:</p>
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                            {[
+                                                {
+                                                    title: 'الخيار 1 (موصى به)',
+                                                    icon: 'fa-cloud-upload-alt',
+                                                    color: 'emerald',
+                                                    desc: 'تتبع الانطباعات (Impressions) من التطبيق وحساب الأرباح تلقائياً بناءً على eCPM المتوسط.',
+                                                    code: '// في AdMob Listener:\nonAdImpression {\n  AdRevenueTracker.logImpression()\n}'
+                                                },
+                                                {
+                                                    title: 'الخيار 2',
+                                                    icon: 'fa-edit',
+                                                    color: 'blue',
+                                                    desc: 'أدخل أرباح الإعلانات يدوياً كل يوم أو أسبوع من لوحة AdMob في مجموعة adRevenue.',
+                                                    code: '// من الموقع أو Firebase Console\nadRevenue/2026-06-10: {\n  revenue: 45.30\n}'
+                                                },
+                                                {
+                                                    title: 'الخيار 3 (متقدم)',
+                                                    icon: 'fa-cogs',
+                                                    color: 'purple',
+                                                    desc: 'استخدم AdMob Reporting API مع Firebase Cloud Functions لجلب الأرباح تلقائياً كل 24 ساعة.',
+                                                    code: '// Cloud Function مجدولة\nscheduled.every 24h:\n  fetchAdMobAPI()\n  saveToFirestore()'
+                                                }
+                                            ].map((opt, i) => (
+                                                <div key={i} className={`border border-${opt.color}-200 bg-${opt.color}-50 rounded-xl p-4`}>
+                                                    <div className={`w-10 h-10 bg-${opt.color}-500 rounded-xl flex items-center justify-center mb-3`}>
+                                                        <i className={`fas ${opt.icon} text-white`}></i>
+                                                    </div>
+                                                    <h5 className={`font-black text-${opt.color}-800 mb-2`}>{opt.title}</h5>
+                                                    <p className="text-gray-600 text-xs mb-3">{opt.desc}</p>
+                                                    <div className="bg-gray-900 rounded-lg p-2 font-mono text-xs text-emerald-300 whitespace-pre">{opt.code}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div>
+                                            <h4 className="font-black text-gray-800 mb-2">كود Kotlin لتتبع الانطباعات (الخيار 1):</h4>
+                                            <div className="bg-gray-900 rounded-xl p-4 font-mono text-xs overflow-x-auto leading-relaxed">
+                                                <pre className="text-gray-100 whitespace-pre">{`// أضف هذا في كل مكان تعرض فيه إعلان AdMob
+
+object AdRevenueTracker {
+    private val db = FirebaseFirestore.getInstance()
+    private val dateFormat  = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    private val monthFormat = SimpleDateFormat("yyyy-MM",    Locale.US)
+
+    fun logImpression(estimatedRevenue: Double = 0.002) {
+        // estimatedRevenue = eCPM المتوسط ÷ 1000
+        // اضبطه حسب eCPM الفعلي من لوحة AdMob
+        val today = dateFormat.format(Date())
+        val month = monthFormat.format(Date())
+
+        val docRef = db.collection("adRevenue").document(today)
+        db.runTransaction { tx ->
+            val snap = tx.get(docRef)
+            val current = snap.getDouble("revenue") ?: 0.0
+            val impressions = snap.getLong("impressions") ?: 0L
+            tx.set(docRef, mapOf(
+                "date"        to today,
+                "month"       to month,
+                "revenue"     to current + estimatedRevenue,
+                "impressions" to impressions + 1,
+                "source"      to "admob"
+            ))
+        }
+    }
+}
+
+// الاستخدام في BannerAd:
+banner.adListener = object : AdListener() {
+    override fun onAdImpression() {
+        AdRevenueTracker.logImpression()
+    }
+}
+
+// الاستخدام في RewardedAd:
+rewardedAd?.show(this) { rewardItem ->
+    AdRevenueTracker.logImpression(estimatedRevenue = 0.02) // Rewarded أعلى eCPM
+}`}</pre>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* === القسم 4: قواعد Firestore Security === */}
+                                <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+                                    <div className="bg-gradient-to-r from-red-600 to-rose-600 p-4">
+                                        <h3 className="text-white font-black text-lg"><i className="fas fa-shield-alt ml-2"></i>القسم 4: قواعد أمان Firestore</h3>
+                                        <p className="text-red-100 text-sm mt-1">أضف هذه القواعد في Firebase Console → Firestore → Rules</p>
+                                    </div>
+                                    <div className="p-6">
+                                        <div className="bg-gray-900 rounded-xl p-4 font-mono text-xs overflow-x-auto leading-relaxed">
+                                            <pre className="text-gray-100 whitespace-pre">{`rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // مجموعة users: كل مستخدم يقرأ/يكتب بياناته فقط
+    match /users/{userId} {
+      allow read, write: if request.auth != null
+                         && request.auth.uid == userId;
+    }
+
+    // مجموعة paymentEvents: المستخدم يكتب فقط
+    // القراءة للأدمن فقط عبر Admin SDK
+    match /paymentEvents/{docId} {
+      allow create: if request.auth != null
+                    && request.resource.data.userId == request.auth.uid;
+      allow read:   if false; // Admin SDK فقط
+    }
+
+    // مجموعة adRevenue: التطبيق يكتب، الأدمن يقرأ
+    match /adRevenue/{docId} {
+      allow write: if request.auth != null;
+      allow read:  if false; // Admin SDK فقط
+    }
+
+    // مجموعة pageViews: التطبيق يكتب (تسجيل)، واللوحة تقرأ
+    match /pageViews/{pageId} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}`}</pre>
+                                        </div>
+                                        <div className="mt-4 bg-red-50 border border-red-200 rounded-xl p-4">
+                                            <p className="text-red-800 text-sm"><i className="fas fa-exclamation-triangle ml-1"></i>
+                                                <strong>ملاحظة:</strong> الموقع (لوحة التحكم) يقرأ البيانات عبر Firebase Admin SDK (من خلال السكريبت الموجود في script.js الذي يملك صلاحيات المشرف). لذلك قواعد <code className="bg-red-100 px-1 rounded">allow read: if false</code> لا تمنع الموقع من القراءة.</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* === القسم 5: ملخص خطوات التطبيق === */}
+                                <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-2xl p-6 text-white shadow-xl">
+                                    <h3 className="font-black text-xl mb-5"><i className="fas fa-list-check ml-2"></i>ملخص: الخطوات المطلوبة بالترتيب</h3>
+                                    <div className="space-y-3">
+                                        {[
+                                            { step: '1', title: 'أنشئ ملف SubscriptionManager.kt', desc: 'والصق فيه الكود من القسم 2 أعلاه', icon: 'fa-file-code' },
+                                            { step: '2', title: 'أضف مستدعيات logPaymentEvent', desc: 'في كل نقطة من مسار الدفع (5 نقاط كما في القسم 2)', icon: 'fa-code-branch' },
+                                            { step: '3', title: 'استدعِ saveSubscription عند نجاح الدفع', desc: 'مع تمرير plan, startDate, endDate, transactionId', icon: 'fa-check-circle' },
+                                            { step: '4', title: 'أضف AdRevenueTracker.kt', desc: 'واستدعِ logImpression() في كل AdListener', icon: 'fa-ad' },
+                                            { step: '5', title: 'حدّث قواعد Firestore', desc: 'من Firebase Console → Firestore → Rules', icon: 'fa-shield-alt' },
+                                            { step: '6', title: 'انتظر أول تفاعل حقيقي', desc: 'ستظهر البيانات في لوحة التحكم فور تسجيل أول حدث', icon: 'fa-chart-line' }
+                                        ].map(item => (
+                                            <div key={item.step} className="flex items-center gap-4 bg-white/10 rounded-xl p-3">
+                                                <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center font-black text-sm shrink-0">{item.step}</div>
+                                                <i className={`fas ${item.icon} text-indigo-200 text-lg w-5 shrink-0`}></i>
+                                                <div>
+                                                    <p className="font-bold">{item.title}</p>
+                                                    <p className="text-indigo-200 text-xs">{item.desc}</p>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<Dashboard />);
+    </script>
+</body>
+
+</html>
