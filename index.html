@@ -3,32 +3,73 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>نظام إدارة الدعم المتكامل - Expert Dashboard</title>
-    <link rel="stylesheet" href="style.css?v=4.1">
+    <script>
+        (function () {
+            const BUILD = '7.15-notification-live-20260612';
+            const KEY = 'supportDashboardBuild';
+            const previousBuild = localStorage.getItem(KEY);
+
+            if ('caches' in window) {
+                caches.keys().then(function (keys) {
+                    return Promise.all(keys.map(function (key) { return caches.delete(key); }));
+                }).catch(function () {});
+            }
+
+            if (previousBuild && previousBuild !== BUILD && !sessionStorage.getItem('supportDashboardBuildReload')) {
+                localStorage.setItem(KEY, BUILD);
+                sessionStorage.setItem('supportDashboardBuildReload', '1');
+                const url = new URL(window.location.href);
+                url.searchParams.set('_cb', String(Date.now()));
+                window.location.replace(url.toString());
+                return;
+            }
+
+            localStorage.setItem(KEY, BUILD);
+            sessionStorage.removeItem('supportDashboardBuildReload');
+        })();
+    </script>
+    <link rel="stylesheet" href="style.css?v=7.15&t=20260612-notification-live">
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
     <!-- Firebase SDK -->
     <script type="module">
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
-        import { getFirestore, collection, query, onSnapshot, doc, updateDoc, orderBy } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
-        import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
+        import { getFirestore, collection, query, onSnapshot, getDocs, doc, updateDoc, orderBy, addDoc, deleteDoc, limit, connectFirestoreEmulator } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+        import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, EmailAuthProvider, updatePassword, reauthenticateWithCredential } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
+        import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js';
         import { getStorage } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js';
-        import { firebaseConfig } from './firebase-config.js';
+        import { firebaseConfig } from './firebase-config.js?v=7.15';
         
         window.firebaseApp = initializeApp(firebaseConfig);
         window.db = getFirestore(window.firebaseApp);
+        
         window.auth = getAuth(window.firebaseApp);
+        window.functions = getFunctions(window.firebaseApp);
+        window.httpsCallable = httpsCallable;
         window.storage = getStorage(window.firebaseApp);
         window.collection = collection;
         window.query = query;
         window.onSnapshot = onSnapshot;
+        window.getDocs = getDocs;
         window.doc = doc;
         window.updateDoc = updateDoc;
         window.orderBy = orderBy;
+        window.addDoc = addDoc;
+        window.deleteDoc = deleteDoc;
+        window.limit = limit;
         window.signInWithEmailAndPassword = signInWithEmailAndPassword;
         window.signOut = signOut;
         window.onAuthStateChanged = onAuthStateChanged;
+        window.EmailAuthProvider = EmailAuthProvider;
+        window.updatePassword = updatePassword;
+        window.reauthenticateWithCredential = reauthenticateWithCredential;
+        
+        console.log('🔧 تم تهيئة Firebase بإعدادات محسّنة');
     </script>
-    <script type="module" src="script.js?v=4.1"></script>
+    <script src="script.js?v=7.15&t=20260612-notification-live"></script>
 </head>
 <body>
     <!-- صفحة تسجيل الدخول - تصميم فاخر -->
@@ -58,23 +99,23 @@
                         <h2>مرحباً بعودتك</h2>
                         <p>سجل الدخول للوصول إلى لوحة التحكم</p>
                     </div>
-                    <form id="loginForm" class="login-form">
+                    <form id="loginForm" class="login-form" autocomplete="on">
                         <div class="input-group">
-                            <label>البريد الإلكتروني</label>
+                            <label for="emailInput">البريد الإلكتروني</label>
                             <div class="input-icon">
                                 <svg class="icon" width="20" height="20" viewBox="0 0 20 20" fill="none">
                                     <path d="M2.5 5L10 10.5L17.5 5M2.5 5H17.5V15H2.5V5Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
                                 </svg>
-                                <input type="email" id="emailInput" placeholder="admin@langhubsupport.com" required>
+                                <input type="email" id="emailInput" name="username" autocomplete="username" placeholder="hasanlast318@gmail.com" required>
                             </div>
                         </div>
                         <div class="input-group">
-                            <label>كلمة المرور</label>
+                            <label for="passwordInput">كلمة المرور</label>
                             <div class="input-icon">
                                 <svg class="icon" width="20" height="20" viewBox="0 0 20 20" fill="none">
                                     <path d="M5.83333 8.33333V5.83333C5.83333 3.53233 7.69899 1.66667 10 1.66667C12.301 1.66667 14.1667 3.53233 14.1667 5.83333V8.33333M10 13.3333V15M6.66667 18.3333H13.3333C14.8061 18.3333 16 17.1394 16 15.6667V11C16 9.52724 14.8061 8.33333 13.3333 8.33333H6.66667C5.19391 8.33333 4 9.52724 4 11V15.6667C4 17.1394 5.19391 18.3333 6.66667 18.3333Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/>
                                 </svg>
-                                <input type="password" id="passwordInput" placeholder="••••••••" required>
+                                <input type="password" id="passwordInput" name="password" autocomplete="current-password" placeholder="••••••••" required>
                             </div>
                         </div>
                         <button type="submit" id="loginBtn" class="login-submit">
@@ -163,18 +204,31 @@
 
             <div class="conversations-header-new">
                 <span>جميع المحادثات</span>
-                <span class="badge-new" id="conversationsCount">0</span>
+                <span class="badge-new badge-spacing" id="conversationsCount">0</span>
             </div>
+
+            <button type="button" class="archive-btn-new" id="archiveViewBtn" title="عرض الأرشيف">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M2 3h12M3.5 3v9.5a1.5 1.5 0 0 0 1.5 1.5h4a1.5 1.5 0 0 0 1.5-1.5V3M6 7v4M10 7v4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span>الأرشيف</span>
+            </button>
 
             <div class="bulk-actions-new">
                 <label class="select-all-new">
                     <input type="checkbox" id="selectAllConversations">
                     <span>تحديد الكل</span>
                 </label>
-                <button type="button" class="bulk-delete-new" id="deleteSelectedChatsBtn" disabled>
-                    حذف المحدد
-                    <span id="selectedChatsCount">0</span>
-                </button>
+                <div class="bulk-actions-buttons">
+                    <button type="button" class="bulk-archive-new" id="archiveSelectedChatsBtn" disabled>
+                        حفظ في الارشيف
+                        <span id="archivedChatsCount">0</span>
+                    </button>
+                    <button type="button" class="bulk-delete-new" id="deleteSelectedChatsBtn" disabled>
+                        حذف المحدد
+                        <span id="selectedChatsCount">0</span>
+                    </button>
+                </div>
             </div>
 
             <div class="conversations-list-new" id="conversationsList">
@@ -185,6 +239,13 @@
             </div>
 
             <div class="sidebar-footer">
+                <button class="settings-toggle-btn" id="settingsToggleBtn" title="الإعدادات">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
+                    </svg>
+                </button>
+
                 <button class="theme-toggle-new" id="themeToggleBtn">
                     <svg class="theme-icon-light" width="18" height="18" viewBox="0 0 18 18" fill="none">
                         <path d="M9 1V2M9 16V17M2.5 3.5L3.5 4.5M14.5 14.5L15.5 15.5M1 9H2M16 9H17M3.5 14.5L2.5 15.5M15.5 3.5L14.5 4.5M12.5 9C12.5 10.933 10.933 12.5 9 12.5C7.067 12.5 5.5 10.933 5.5 9C5.5 7.067 7.067 5.5 9 5.5C10.933 5.5 12.5 7.067 12.5 9Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/>
@@ -384,16 +445,16 @@
                 <div class="users-page-stats-new">
                     <div>
                         <span id="allUsersCount">0</span>
-                        <small>مستخدم</small>
+                        <small id="usersPrimaryStatLabel">مستخدم</small>
                     </div>
-                    <div>
+                    <div id="usersSecondaryStatWrap">
                         <span id="notificationSelectedCount">0</span>
-                        <small>محدد</small>
+                        <small id="usersSecondaryStatLabel">محدد</small>
                     </div>
                 </div>
             </div>
 
-            <div class="users-tools-new">
+            <div class="users-tools-new" id="usersToolsPanel">
                 <div class="users-tools-main-new">
                     <div class="users-search-new">
                         <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
@@ -445,8 +506,64 @@
                 </div>
             </div>
 
+            <div class="users-tools-new" id="guestsToolsPanel" style="display: none;">
+                <div class="users-tools-main-new">
+                    <div class="users-search-new">
+                        <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                            <path d="M8.25 14.25C11.5637 14.25 14.25 11.5637 14.25 8.25C14.25 4.93629 11.5637 2.25 8.25 2.25C4.93629 2.25 2.25 4.93629 2.25 8.25C2.25 11.5637 4.93629 14.25 8.25 14.25Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                            <path d="M15.75 15.75L12.4875 12.4875" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                        </svg>
+                        <input type="text" id="guestsSearchInput" placeholder="بحث بمعرف الضيف أو الإصدار">
+                    </div>
+                    <label class="users-select-all-new">
+                        <input type="checkbox" id="selectAllGuestUsers">
+                        <span>تحديد الكل</span>
+                    </label>
+                    <button type="button" class="users-advanced-toggle-new" id="guestsAdvancedFiltersBtn" aria-expanded="false" aria-controls="guestsAdvancedFilters">
+                        <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                            <path d="M3 5H15M5.25 9H12.75M7.5 13H10.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                        </svg>
+                        <span>فلاتر متقدمة</span>
+                        <small id="guestsActiveFiltersCount"></small>
+                    </button>
+                    <button type="button" class="users-delete-selected-new" id="deleteSelectedGuestsBtn" disabled>حذف المحدد</button>
+                </div>
+                <div class="users-advanced-filters-new hidden" id="guestsAdvancedFilters">
+                    <select class="users-filter-new" id="guestsPresenceFilter">
+                        <option value="all">كل الضيوف</option>
+                        <option value="online">المتصلون</option>
+                        <option value="offline">غير المتصلين</option>
+                    </select>
+                    <select class="users-filter-new" id="guestsAppVersionFilter">
+                        <option value="all">كل الإصدارات</option>
+                    </select>
+                    <select class="users-filter-new" id="guestsInactivityFilter">
+                        <option value="all">كل مدد الاستخدام</option>
+                        <option value="never">لا يوجد آخر استخدام</option>
+                        <option value="1">لم يستخدم منذ يوم</option>
+                        <option value="2">لم يستخدم منذ يومين</option>
+                        <option value="7">لم يستخدم منذ أسبوع</option>
+                        <option value="30">لم يستخدم منذ شهر</option>
+                        <option value="custom">مدة محددة</option>
+                    </select>
+                    <div class="users-custom-inactivity-new hidden" id="guestsCustomInactivityWrap">
+                        <input type="number" id="guestsCustomInactivityValue" min="1" step="1" value="1" aria-label="مدة عدم الاستخدام">
+                        <select id="guestsCustomInactivityUnit" aria-label="وحدة مدة عدم الاستخدام">
+                            <option value="days">يوم</option>
+                            <option value="weeks">أسبوع</option>
+                            <option value="months">شهر</option>
+                        </select>
+                    </div>
+                    <button type="button" class="users-clear-filters-new" id="guestsClearFiltersBtn">مسح الفلاتر</button>
+                </div>
+            </div>
+
             <div class="users-subtabs-new">
                 <button type="button" class="users-subtab-new active" id="usersSelectionTabBtn">اختيار المستخدمين</button>
+                <button type="button" class="users-subtab-new" id="guestUsersTabBtn">
+                    <span>حسابات الضيوف</span>
+                    <small id="guestUsersCount">0</small>
+                </button>
                 <button type="button" class="users-subtab-new" id="notificationsHistoryTabBtn">
                     <span>سجل الإشعارات</span>
                     <small id="notificationsHistoryCount">0</small>
@@ -473,11 +590,11 @@
                         <div class="empty-user-details-new">اضغط على مستخدم لعرض تفاصيله الكاملة.</div>
                     </div>
 
-                    <div class="notification-compose-new">
+                    <form class="notification-compose-new" autocomplete="off" novalidate onsubmit="return false;">
                         <h3>إرسال إشعار</h3>
-                        <input type="text" id="notificationTitleInput" placeholder="عنوان الإشعار">
-                        <textarea id="notificationBodyInput" rows="5" placeholder="نص الإشعار"></textarea>
-                        <select id="notificationLinkInput" title="رابط أو مسار داخل التطبيق (اختياري)">
+                        <input type="text" id="notificationTitleInput" name="notification-title" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="other" placeholder="عنوان الإشعار">
+                        <textarea id="notificationBodyInput" name="notification-body" rows="5" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="other" placeholder="نص الإشعار"></textarea>
+                        <select id="notificationLinkInput" name="notification-link" autocomplete="off" data-lpignore="true" data-1p-ignore title="رابط أو مسار داخل التطبيق (اختياري)">
                             <option value="">لا يوجد توجيه (افتح الصفحة الرئيسية فقط)</option>
                             <option value="levels">الرئيسية (خريطة المستويات)</option>
                             <option value="profile">الملف الشخصي</option>
@@ -507,10 +624,32 @@
                             <option value="about">حول التطبيق</option>
                             <option value="custom_path">مسار مخصص...</option>
                         </select>
-                        <input type="text" id="notificationCustomLinkInput" placeholder="اكتب المسار المخصص هنا..." style="display: none; margin-top: 4px;">
+                        <input type="text" id="notificationCustomLinkInput" name="notification-custom-link" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="other" placeholder="اكتب المسار المخصص هنا..." style="display: none; margin-top: 4px;">
                         <button type="button" id="sendNotificationBtn" disabled>إرسال للمحددين</button>
-                    </div>
+                    </form>
                 </aside>
+            </div>
+
+            <div class="guests-view-new" id="guestsView" style="display: none;">
+                <div class="users-workspace-new guests-workspace-new">
+                    <div class="users-table-panel-new">
+                        <div class="users-table-header-new">
+                            <span></span>
+                            <span>الضيف</span>
+                            <span>اليومي</span>
+                            <span>الأسبوعي</span>
+                            <span>الشهري</span>
+                            <span>الإصدار</span>
+                            <span>آخر استخدام</span>
+                            <span>الحالة</span>
+                        </div>
+                        <div class="users-table-list-new" id="guestsTableList"></div>
+                    </div>
+
+                    <aside class="notification-panel-new" id="guestUserDetails">
+                        <div class="empty-user-details-new">اضغط على ضيف لعرض تفاصيله الكاملة.</div>
+                    </aside>
+                </div>
             </div>
 
             <div class="notifications-history-view-new" id="notificationsHistoryView" style="display: none;">
@@ -526,7 +665,7 @@
                                     <path d="M8.25 14.25C11.5637 14.25 14.25 11.5637 14.25 8.25C14.25 4.93629 11.5637 2.25 8.25 2.25C4.93629 2.25 2.25 4.93629 2.25 8.25C2.25 11.5637 4.93629 14.25 8.25 14.25Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                                     <path d="M15.75 15.75L12.4875 12.4875" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                                 </svg>
-                                <input type="text" id="notificationsHistorySearchInput" placeholder="بحث في العنوان أو النص أو المستلمين">
+                                <input type="search" id="notificationsHistorySearchInput" name="notifications-history-search" role="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="search" placeholder="بحث في العنوان أو النص أو المستلمين">
                             </div>
                             <label class="history-select-all-new">
                                 <input type="checkbox" id="selectAllNotificationHistory">
@@ -554,6 +693,217 @@
             <iframe id="dashboardIframe" src="" style="border:none; width:100%; height:100%;"></iframe>
         </section>
 
+        <!-- صفحة الإعدادات -->
+        <section class="settings-page-new" id="settingsPage" style="display: none;">
+            <div class="settings-page-header-new">
+                <div class="settings-page-title-new">
+                    <button class="menu-toggle-btn settings-menu-btn" id="settingsMenuToggleBtn" title="عرض القائمة الجانبية">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="3" y1="12" x2="21" y2="12"></line>
+                            <line x1="3" y1="6" x2="21" y2="6"></line>
+                            <line x1="3" y1="18" x2="21" y2="18"></line>
+                        </svg>
+                    </button>
+                    <div>
+                        <h2>الإعدادات</h2>
+                        <p>إدارة حسابك وتخصيص تجربة الدعم</p>
+                    </div>
+                </div>
+                <button type="button" class="settings-back-btn" id="settingsBackBtn" aria-label="العودة للدردشة">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M19 12H5M12 19l-7-7 7-7"></path>
+                    </svg>
+                    <span class="settings-back-text">العودة للدردشة</span>
+                </button>
+            </div>
+
+            <div class="settings-layout-new">
+                <div class="settings-nav-scroll-wrap">
+                    <nav class="settings-nav-new" id="settingsNav" aria-label="أقسام الإعدادات">
+                    <button type="button" class="settings-nav-item active" data-panel="hub">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                        <span>نظرة عامة</span>
+                    </button>
+                    <button type="button" class="settings-nav-item" data-panel="account">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                        <span>حسابي</span>
+                    </button>
+                    <button type="button" class="settings-nav-item" data-panel="email">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                        <span>بريدي الإلكتروني</span>
+                    </button>
+                    <button type="button" class="settings-nav-item" data-panel="password">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        <span>تغيير كلمة المرور</span>
+                    </button>
+                    <button type="button" class="settings-nav-item" data-panel="shortcuts">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        <span>اختصارات سريعة</span>
+                    </button>
+                    </nav>
+                </div>
+
+                <div class="settings-content-new" id="settingsContent">
+                    <!-- نظرة عامة -->
+                    <div class="settings-panel-new active" id="settingsPanelHub" data-panel="hub">
+                        <div class="settings-panel-head">
+                            <h3>مرحباً بك في الإعدادات</h3>
+                            <p>اختر أحد الأقسام أدناه لإدارة حسابك وتحسين سير عملك</p>
+                        </div>
+                        <div class="settings-hub-grid">
+                            <button type="button" class="settings-hub-card" data-goto="account">
+                                <div class="settings-hub-icon" style="background: rgba(99,102,241,0.12); color: #6366f1;">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                                </div>
+                                <div class="settings-hub-text">
+                                    <strong>حسابي</strong>
+                                    <span>عرض معلومات الحساب وتاريخ الإنشاء</span>
+                                </div>
+                            </button>
+                            <button type="button" class="settings-hub-card" data-goto="email">
+                                <div class="settings-hub-icon" style="background: rgba(59,130,246,0.12); color: #3b82f6;">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                                </div>
+                                <div class="settings-hub-text">
+                                    <strong>بريدي الإلكتروني</strong>
+                                    <span>عرض ونسخ بريدك المسجل</span>
+                                </div>
+                            </button>
+                            <button type="button" class="settings-hub-card" data-goto="password">
+                                <div class="settings-hub-icon" style="background: rgba(139,92,246,0.12); color: #8b5cf6;">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                                </div>
+                                <div class="settings-hub-text">
+                                    <strong>تغيير كلمة المرور</strong>
+                                    <span>تحديث كلمة المرور بأمان</span>
+                                </div>
+                            </button>
+                            <button type="button" class="settings-hub-card" data-goto="shortcuts">
+                                <div class="settings-hub-icon" style="background: rgba(16,185,129,0.12); color: #10b981;">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                                </div>
+                                <div class="settings-hub-text">
+                                    <strong>اختصارات سريعة</strong>
+                                    <span>إدارة ردود الدردشة الجاهزة</span>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- حسابي -->
+                    <div class="settings-panel-new" id="settingsPanelAccount" data-panel="account">
+                        <div class="settings-panel-head">
+                            <h3>حسابي</h3>
+                            <p>معلومات حسابك المسجل في لوحة الدعم</p>
+                        </div>
+                        <div class="settings-card-new">
+                            <div class="settings-info-grid">
+                                <div class="settings-info-item">
+                                    <label>اسم المستخدم</label>
+                                    <p id="accountUsername">—</p>
+                                </div>
+                                <div class="settings-info-item">
+                                    <label>البريد الإلكتروني</label>
+                                    <p id="accountEmail">—</p>
+                                </div>
+                                <div class="settings-info-item">
+                                    <label>تاريخ الإنشاء</label>
+                                    <p id="accountCreatedDate">—</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- البريد الإلكتروني -->
+                    <div class="settings-panel-new" id="settingsPanelEmail" data-panel="email">
+                        <div class="settings-panel-head">
+                            <h3>بريدي الإلكتروني</h3>
+                            <p>البريد المرتبط بحسابك في نظام الدعم</p>
+                        </div>
+                        <div class="settings-card-new">
+                            <div class="settings-email-display">
+                                <div class="settings-email-icon">
+                                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                                </div>
+                                <div class="settings-email-content">
+                                    <label>البريد المسجل</label>
+                                    <p id="settingsEmailValue">—</p>
+                                </div>
+                            </div>
+                            <p class="settings-email-hint">يُستخدم هذا البريد لتسجيل الدخول إلى لوحة الدعم واستقبال إشعارات النظام.</p>
+                            <button type="button" class="btn-primary" id="copyEmailBtn">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                نسخ البريد الإلكتروني
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- تغيير كلمة المرور -->
+                    <div class="settings-panel-new" id="settingsPanelPassword" data-panel="password">
+                        <div class="settings-panel-head">
+                            <h3>تغيير كلمة المرور</h3>
+                            <p>قم بتحديث كلمة المرور لحماية حسابك</p>
+                        </div>
+                        <div class="settings-card-new settings-form-card">
+                            <div class="form-group">
+                                <label>كلمة المرور الحالية</label>
+                                <input type="password" id="currentPassword" placeholder="أدخل كلمة المرور الحالية" class="form-input">
+                            </div>
+                            <div class="form-group">
+                                <label>كلمة المرور الجديدة</label>
+                                <input type="password" id="newPassword" placeholder="أدخل كلمة المرور الجديدة" class="form-input">
+                            </div>
+                            <div class="form-group">
+                                <label>تأكيد كلمة المرور الجديدة</label>
+                                <input type="password" id="confirmNewPassword" placeholder="أكد كلمة المرور الجديدة" class="form-input">
+                            </div>
+                            <div id="passwordChangeError" class="error-message" style="display: none;"></div>
+                            <div class="settings-form-actions">
+                                <button type="button" class="btn-secondary" id="resetPasswordFormBtn">إعادة تعيين</button>
+                                <button type="button" class="btn-primary" id="savePasswordBtn">حفظ التغييرات</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- اختصارات سريعة -->
+                    <div class="settings-panel-new" id="settingsPanelShortcuts" data-panel="shortcuts">
+                        <div class="settings-panel-head settings-panel-head-row">
+                            <div>
+                                <h3>اختصارات سريعة للدردشة</h3>
+                                <p>أنشئ اختصارات لإدراج ردود جاهزة أثناء المحادثة — اكتب اسم المختصر واضغط Enter</p>
+                            </div>
+                            <button type="button" class="btn-primary" id="openAddShortcutFromViewBtn">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                إضافة اختصار
+                            </button>
+                        </div>
+
+                        <div class="settings-card-new shortcut-form-card" id="shortcutFormCard" style="display: none;">
+                            <h4 id="addShortcutModalTitle">إضافة اختصار جديد</h4>
+                            <div class="form-group">
+                                <label>اسم المختصر <span class="required">*</span></label>
+                                <input type="text" id="shortcutName" placeholder="مثال: شكراً" class="form-input" maxlength="30">
+                                <small class="form-hint">الكلمة التي تكتبها في الدردشة لتفعيل المختصر</small>
+                            </div>
+                            <div class="form-group">
+                                <label>النص الكامل <span class="required">*</span></label>
+                                <textarea id="shortcutText" placeholder="النص الكامل الذي سيظهر عند استخدام المختصر" class="form-textarea" rows="5" maxlength="500"></textarea>
+                            </div>
+                            <div id="addShortcutError" class="error-message" style="display: none;"></div>
+                            <div class="settings-form-actions">
+                                <button type="button" class="btn-secondary" id="cancelShortcutFormBtn">إلغاء</button>
+                                <button type="button" class="btn-primary" id="saveShortcutBtn">حفظ المختصر</button>
+                            </div>
+                        </div>
+
+                        <div class="settings-card-new">
+                            <div id="shortcutsList" class="shortcuts-list"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <div class="media-viewer-new" id="mediaViewer" style="display: none;">
             <div class="media-viewer-backdrop" id="mediaViewerBackdrop"></div>
             <div class="media-viewer-dialog" role="dialog" aria-modal="true" aria-label="عرض المرفق">
@@ -567,7 +917,7 @@
                 <div class="media-viewer-body" id="mediaViewerBody"></div>
             </div>
         </div>
-        
+
         <div id="toast" class="toast-new"></div>
         
         <!-- Sidebar overlay for mobile drawers -->
