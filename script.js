@@ -1,13 +1,25 @@
-// استيراد Firebase
-import { getFirestore, collection, query, onSnapshot, doc, updateDoc, addDoc, orderBy, limit, deleteDoc } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
-import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js';
+// استخدام Firebase الذي تم تهيئته في HTML
+// Firebase objects متاحة على window من الـ <script type="module"> الأول
+console.log('🔴 [DEBUG] script.js is starting to execute...');
 
-// تهيئة Firestore
-const db = window.db;
-const auth = window.auth;
-const storage = window.storage || (window.firebaseApp ? getStorage(window.firebaseApp) : null);
+// تعريف DB و Auth بشكل آمن
+const db = () => window.db;
+const auth = () => window.auth;
+const collection = (...args) => window.collection(...args);
+const query = (...args) => window.query(...args);
+const doc = (...args) => window.doc(...args);
+const updateDoc = (...args) => window.updateDoc(...args);
+const orderBy = (...args) => window.orderBy(...args);
+const addDoc = (...args) => window.addDoc(...args);
+const deleteDoc = (...args) => window.deleteDoc(...args);
+const limit = (...args) => window.limit(...args);
+const onSnapshot = (...args) => window.onSnapshot(...args);
+const getDocs = (...args) => window.getDocs(...args);
+const functions = () => window.functions;
+const httpsCallable = (...args) => window.httpsCallable(...args);
 const COLLECTION_NAME = "reports";
 const USERS_COLLECTION_NAME = "users";
+const GUEST_USERS_COLLECTION_NAME = "guestUsers";
 const NOTIFICATION_REQUESTS_COLLECTION = "notificationRequests";
 const USER_DELETION_REQUESTS_COLLECTION = "userDeletionRequests";
 const GAS_URL = "https://script.google.com/macros/s/AKfycbzPymoY-eLQdGfkxvX_BeDYRma4gBM8murSh3cEsT_z9CDOkBHXuxdz_8xALzAxzA3FtA/exec";
@@ -19,15 +31,22 @@ const REPORT_PAGE_HEARTBEAT_TIMEOUT = 9000;
 // متغيرات عامة
 let allUsers = [];
 let appUsers = [];
+let guestUsers = [];
 let pageViewsData = [];
 let selectedUserId = null;
 let activeView = 'chat';
 let activeUsersPanel = 'selection';
 let selectedNotificationUserId = null;
+let selectedGuestUserId = null;
 let selectedNotificationHistoryId = null;
+let guestUsersLoadError = null;
 let currentMessages = [];
 let messageListener = null;
 let notificationHistoryListener = null;
+let notificationHistoryLoadError = null;
+let selectedNotificationListener = null;
+let guestUsersListener = null;
+let supportListenersStarted = false;
 let currentTheme = 'light';
 let selectedAttachmentFile = null;
 let selectedAttachmentKind = null;
@@ -38,110 +57,309 @@ let statusTooltipElement = null;
 let statusTooltipLongPressTimer = null;
 const selectedConversationIds = new Set();
 const selectedNotificationUserIds = new Set();
+const selectedGuestUserIds = new Set();
 const selectedNotificationHistoryIds = new Set();
 const resolvedAttachmentUrls = new Map();
 let notificationHistory = [];
 
-// عناصر DOM للتسجيل الدخول
-const loginContainer = document.getElementById('loginContainer');
-const appContainer = document.getElementById('appContainer');
-const loginForm = document.getElementById('loginForm');
-const emailInput = document.getElementById('emailInput');
-const passwordInput = document.getElementById('passwordInput');
-const loginBtn = document.getElementById('loginBtn');
-const loginError = document.getElementById('loginError');
+// عناصر DOM للتسجيل الدخول (سيتم تهيئتها بعد تحميل DOM)
+let loginContainer = null;
+let appContainer = null;
+let loginForm = null;
+let emailInput = null;
+let passwordInput = null;
+let loginBtn = null;
+let loginError = null;
 
-// عناصر DOM الجديدة (مطابقة للتصميم الجديد)
-const conversationsList = document.getElementById('conversationsList');
-const messagesList = document.getElementById('messagesList');
-const messagesContainer = document.getElementById('messagesContainer');
-const emptyState = document.getElementById('emptyState');
-const replyArea = document.getElementById('replyArea');
-const chatHeader = document.getElementById('chatHeader');
-const messageInput = document.getElementById('messageInput');
-const sendBtn = document.getElementById('sendBtn');
-const attachBtn = document.getElementById('attachBtn');
-const attachmentInput = document.getElementById('attachmentInput');
-const attachmentPreview = document.getElementById('attachmentPreview');
-const searchInput = document.getElementById('searchInput');
-const usersCountSpan = document.getElementById('usersCount');
-const totalTicketsSpan = document.getElementById('totalTickets');
-const messagesEnd = document.getElementById('messagesEnd');
-const userStatusToggle = document.getElementById('userStatusToggle');
-const userStatusPopover = document.getElementById('userStatusPopover');
-const showInfoBtn = document.getElementById('showInfoBtn');
-const infoPanel = document.getElementById('infoPanel');
-const closeInfoBtn = document.getElementById('closeInfoBtn');
-const infoContent = document.getElementById('infoContent');
-const logoutBtn = document.getElementById('logoutBtn');
-const sidebarLogoutBtn = document.getElementById('sidebarLogoutBtn');
-const toggleReplyBtn = document.getElementById('toggleReplyBtn');
-const toggleStatusBtn = document.getElementById('toggleStatusBtn');
-const deleteChatBtn = document.getElementById('deleteChatBtn');
-const statusDropdown = document.getElementById('statusDropdown');
-const themeToggleBtn = document.getElementById('themeToggleBtn');
-const collapseBtn = document.getElementById('collapseSidebar');
-const restoreSidebarBtn = document.getElementById('restoreSidebarBtn');
-const conversationsCountSpan = document.getElementById('conversationsCount');
-const selectAllConversations = document.getElementById('selectAllConversations');
-const deleteSelectedChatsBtn = document.getElementById('deleteSelectedChatsBtn');
-const selectedChatsCount = document.getElementById('selectedChatsCount');
-const mediaViewer = document.getElementById('mediaViewer');
-const mediaViewerBody = document.getElementById('mediaViewerBody');
-const mediaViewerTitle = document.getElementById('mediaViewerTitle');
-const mediaViewerOpenLink = document.getElementById('mediaViewerOpenLink');
-const mediaViewerCloseBtn = document.getElementById('mediaViewerCloseBtn');
-const mediaViewerBackdrop = document.getElementById('mediaViewerBackdrop');
-const chatViewBtn = document.getElementById('chatViewBtn');
-const usersViewBtn = document.getElementById('usersViewBtn');
-const dashboardViewBtn = document.getElementById('dashboardViewBtn');
-const usersPage = document.getElementById('usersPage');
-const dashboardPage = document.getElementById('dashboardPage');
-const usersTableList = document.getElementById('usersTableList');
-const usersSearchInput = document.getElementById('usersSearchInput');
-const usersPresenceFilter = document.getElementById('usersPresenceFilter');
-const usersAppVersionFilter = document.getElementById('usersAppVersionFilter');
-const usersInactivityFilter = document.getElementById('usersInactivityFilter');
-const usersCustomInactivityWrap = document.getElementById('usersCustomInactivityWrap');
-const usersCustomInactivityValue = document.getElementById('usersCustomInactivityValue');
-const usersCustomInactivityUnit = document.getElementById('usersCustomInactivityUnit');
-const usersAdvancedFiltersBtn = document.getElementById('usersAdvancedFiltersBtn');
-const usersAdvancedFilters = document.getElementById('usersAdvancedFilters');
-const usersActiveFiltersCount = document.getElementById('usersActiveFiltersCount');
-const usersClearFiltersBtn = document.getElementById('usersClearFiltersBtn');
-const usersSelectionTabBtn = document.getElementById('usersSelectionTabBtn');
-const notificationsHistoryTabBtn = document.getElementById('notificationsHistoryTabBtn');
-const usersSelectionView = document.getElementById('usersSelectionView');
-const notificationsHistoryView = document.getElementById('notificationsHistoryView');
-const notificationsHistoryList = document.getElementById('notificationsHistoryList');
-const notificationHistoryDetails = document.getElementById('notificationHistoryDetails');
-const notificationsHistorySearchInput = document.getElementById('notificationsHistorySearchInput');
-const notificationsHistoryCount = document.getElementById('notificationsHistoryCount');
-const selectAllNotificationHistory = document.getElementById('selectAllNotificationHistory');
-const deleteSelectedNotificationsBtn = document.getElementById('deleteSelectedNotificationsBtn');
-const selectedNotificationsCount = document.getElementById('selectedNotificationsCount');
-const selectAllNotificationUsers = document.getElementById('selectAllNotificationUsers');
-const deleteSelectedUsersBtn = document.getElementById('deleteSelectedUsersBtn');
-const allUsersCount = document.getElementById('allUsersCount');
-const notificationSelectedCount = document.getElementById('notificationSelectedCount');
-const selectedUserDetails = document.getElementById('selectedUserDetails');
-const notificationTitleInput = document.getElementById('notificationTitleInput');
-const notificationBodyInput = document.getElementById('notificationBodyInput');
-const notificationLinkInput = document.getElementById('notificationLinkInput');
-const notificationCustomLinkInput = document.getElementById('notificationCustomLinkInput');
-const sendNotificationBtn = document.getElementById('sendNotificationBtn');
+// عناصر DOM الجديدة (سيتم تهيئتها بعد تحميل DOM)
+let conversationsList = null;
+let messagesList = null;
+let messagesContainer = null;
+let emptyState = null;
+let replyArea = null;
+let chatHeader = null;
+let messageInput = null;
+let sendBtn = null;
+let attachBtn = null;
+let attachmentInput = null;
+let attachmentPreview = null;
+let searchInput = null;
+let usersCountSpan = null;
+let totalTicketsSpan = null;
+let messagesEnd = null;
+let userStatusToggle = null;
+let userStatusPopover = null;
+let showInfoBtn = null;
+let infoPanel = null;
+let closeInfoBtn = null;
+let infoContent = null;
+let logoutBtn = null;
+let sidebarLogoutBtn = null;
+let toggleReplyBtn = null;
+let toggleStatusBtn = null;
+let deleteChatBtn = null;
+let statusDropdown = null;
+let themeToggleBtn = null;
+let settingsToggleBtn = null;
+let settingsPage = null;
+let settingsBackBtn = null;
+let settingsMenuToggleBtn = null;
+let settingsEmailValue = null;
+let copyEmailBtn = null;
+let resetPasswordFormBtn = null;
+let shortcutFormCard = null;
+let cancelShortcutFormBtn = null;
+let activeSettingsPanel = 'hub';
+let savePasswordBtn = null;
+let accountUsername = null;
+let accountEmail = null;
+let accountCreatedDate = null;
+let currentPassword = null;
+let newPassword = null;
+let confirmNewPassword = null;
+let passwordChangeError = null;
+let shortcutsList = null;
+let shortcutName = null;
+let shortcutText = null;
+let saveShortcutBtn = null;
+let openAddShortcutFromViewBtn = null;
+let collapseBtn = null;
+let restoreSidebarBtn = null;
+let conversationsCountSpan = null;
+let selectAllConversations = null;
+let deleteSelectedChatsBtn = null;
+let selectedChatsCount = null;
+let archiveSelectedChatsBtn = null;
+let archivedChatsCount = null;
+let archiveViewBtn = null;
+let mediaViewer = null;
+let mediaViewerBody = null;
+let mediaViewerTitle = null;
+let mediaViewerOpenLink = null;
+let mediaViewerCloseBtn = null;
+let mediaViewerBackdrop = null;
+let chatViewBtn = null;
+let usersViewBtn = null;
+let dashboardViewBtn = null;
+let usersPage = null;
+let dashboardPage = null;
+let usersTableList = null;
+let usersSearchInput = null;
+let usersPresenceFilter = null;
+let usersAppVersionFilter = null;
+let usersInactivityFilter = null;
+let usersCustomInactivityWrap = null;
+let usersCustomInactivityValue = null;
+let usersCustomInactivityUnit = null;
+let usersAdvancedFiltersBtn = null;
+let usersAdvancedFilters = null;
+let usersActiveFiltersCount = null;
+let usersClearFiltersBtn = null;
+let usersSelectionTabBtn = null;
+let guestUsersTabBtn = null;
+let notificationsHistoryTabBtn = null;
+let usersSelectionView = null;
+let guestsView = null;
+let notificationsHistoryView = null;
+let usersToolsPanel = null;
+let guestsToolsPanel = null;
+let usersPrimaryStatLabel = null;
+let usersSecondaryStatWrap = null;
+let usersSecondaryStatLabel = null;
+let guestsTableList = null;
+let guestsSearchInput = null;
+let guestUsersCountBadge = null;
+let guestsAppVersionFilter = null;
+let guestsInactivityFilter = null;
+let guestsPresenceFilter = null;
+let guestsCustomInactivityWrap = null;
+let guestsCustomInactivityValue = null;
+let guestsCustomInactivityUnit = null;
+let guestsAdvancedFiltersBtn = null;
+let guestsAdvancedFilters = null;
+let guestsActiveFiltersCount = null;
+let guestsClearFiltersBtn = null;
+let selectAllGuestUsers = null;
+let deleteSelectedGuestsBtn = null;
+let guestUserDetails = null;
+let notificationsHistoryList = null;
+let notificationHistoryDetails = null;
+let notificationsHistorySearchInput = null;
+let notificationsHistoryCount = null;
+let selectAllNotificationHistory = null;
+let deleteSelectedNotificationsBtn = null;
+let selectedNotificationsCount = null;
+let selectAllNotificationUsers = null;
+let deleteSelectedUsersBtn = null;
+let allUsersCount = null;
+let notificationSelectedCount = null;
+let selectedUserDetails = null;
+let notificationTitleInput = null;
+let notificationBodyInput = null;
+let notificationLinkInput = null;
+let notificationCustomLinkInput = null;
+let sendNotificationBtn = null;
 
 // عناصر الـ Modal المخصصة لتعديل الرسالة
 let editingMessageId = null;
-const editModal = document.getElementById('editModal');
-const editMessageTextarea = document.getElementById('editMessageTextarea');
-const saveEditBtn = document.getElementById('saveEditBtn');
-const cancelEditBtn = document.getElementById('cancelEditBtn');
-const closeEditModalBtn = document.getElementById('closeEditModalBtn');
+let editModal = null;
+let editMessageTextarea = null;
+let saveEditBtn = null;
+let cancelEditBtn = null;
+let closeEditModalBtn = null;
+
+// ========== دالة تهيئة عناصر DOM ==========
+function initializeDOMElements() {
+    // عناصر تسجيل الدخول
+    loginContainer = document.getElementById('loginContainer');
+    appContainer = document.getElementById('appContainer');
+    loginForm = document.getElementById('loginForm');
+    emailInput = document.getElementById('emailInput');
+    passwordInput = document.getElementById('passwordInput');
+    loginBtn = document.getElementById('loginBtn');
+    loginError = document.getElementById('loginError');
+    
+    // جميع عناصر الواجهة الأخرى
+    conversationsList = document.getElementById('conversationsList');
+    messagesList = document.getElementById('messagesList');
+    messagesContainer = document.getElementById('messagesContainer');
+    emptyState = document.getElementById('emptyState');
+    replyArea = document.getElementById('replyArea');
+    chatHeader = document.getElementById('chatHeader');
+    messageInput = document.getElementById('messageInput');
+    sendBtn = document.getElementById('sendBtn');
+    attachBtn = document.getElementById('attachBtn');
+    attachmentInput = document.getElementById('attachmentInput');
+    attachmentPreview = document.getElementById('attachmentPreview');
+    searchInput = document.getElementById('searchInput');
+    usersCountSpan = document.getElementById('usersCount');
+    totalTicketsSpan = document.getElementById('totalTickets');
+    messagesEnd = document.getElementById('messagesEnd');
+    userStatusToggle = document.getElementById('userStatusToggle');
+    userStatusPopover = document.getElementById('userStatusPopover');
+    showInfoBtn = document.getElementById('showInfoBtn');
+    infoPanel = document.getElementById('infoPanel');
+    closeInfoBtn = document.getElementById('closeInfoBtn');
+    infoContent = document.getElementById('infoContent');
+    logoutBtn = document.getElementById('logoutBtn');
+    sidebarLogoutBtn = document.getElementById('sidebarLogoutBtn');
+    toggleReplyBtn = document.getElementById('toggleReplyBtn');
+    toggleStatusBtn = document.getElementById('toggleStatusBtn');
+    deleteChatBtn = document.getElementById('deleteChatBtn');
+    statusDropdown = document.getElementById('statusDropdown');
+    themeToggleBtn = document.getElementById('themeToggleBtn');
+    settingsToggleBtn = document.getElementById('settingsToggleBtn');
+    settingsPage = document.getElementById('settingsPage');
+    settingsBackBtn = document.getElementById('settingsBackBtn');
+    settingsMenuToggleBtn = document.getElementById('settingsMenuToggleBtn');
+    settingsEmailValue = document.getElementById('settingsEmailValue');
+    copyEmailBtn = document.getElementById('copyEmailBtn');
+    resetPasswordFormBtn = document.getElementById('resetPasswordFormBtn');
+    shortcutFormCard = document.getElementById('shortcutFormCard');
+    cancelShortcutFormBtn = document.getElementById('cancelShortcutFormBtn');
+    savePasswordBtn = document.getElementById('savePasswordBtn');
+    accountUsername = document.getElementById('accountUsername');
+    accountEmail = document.getElementById('accountEmail');
+    accountCreatedDate = document.getElementById('accountCreatedDate');
+    currentPassword = document.getElementById('currentPassword');
+    newPassword = document.getElementById('newPassword');
+    confirmNewPassword = document.getElementById('confirmNewPassword');
+    passwordChangeError = document.getElementById('passwordChangeError');
+    shortcutsList = document.getElementById('shortcutsList');
+    shortcutName = document.getElementById('shortcutName');
+    shortcutText = document.getElementById('shortcutText');
+    saveShortcutBtn = document.getElementById('saveShortcutBtn');
+    openAddShortcutFromViewBtn = document.getElementById('openAddShortcutFromViewBtn');
+    collapseBtn = document.getElementById('collapseSidebar');
+    restoreSidebarBtn = document.getElementById('restoreSidebarBtn');
+    conversationsCountSpan = document.getElementById('conversationsCount');
+    selectAllConversations = document.getElementById('selectAllConversations');
+    deleteSelectedChatsBtn = document.getElementById('deleteSelectedChatsBtn');
+    selectedChatsCount = document.getElementById('selectedChatsCount');
+    archiveSelectedChatsBtn = document.getElementById('archiveSelectedChatsBtn');
+    archivedChatsCount = document.getElementById('archivedChatsCount');
+    archiveViewBtn = document.getElementById('archiveViewBtn');
+    mediaViewer = document.getElementById('mediaViewer');
+    mediaViewerBody = document.getElementById('mediaViewerBody');
+    mediaViewerTitle = document.getElementById('mediaViewerTitle');
+    mediaViewerOpenLink = document.getElementById('mediaViewerOpenLink');
+    mediaViewerCloseBtn = document.getElementById('mediaViewerCloseBtn');
+    mediaViewerBackdrop = document.getElementById('mediaViewerBackdrop');
+    chatViewBtn = document.getElementById('chatViewBtn');
+    usersViewBtn = document.getElementById('usersViewBtn');
+    dashboardViewBtn = document.getElementById('dashboardViewBtn');
+    usersPage = document.getElementById('usersPage');
+    dashboardPage = document.getElementById('dashboardPage');
+    usersTableList = document.getElementById('usersTableList');
+    usersSearchInput = document.getElementById('usersSearchInput');
+    usersPresenceFilter = document.getElementById('usersPresenceFilter');
+    usersAppVersionFilter = document.getElementById('usersAppVersionFilter');
+    usersInactivityFilter = document.getElementById('usersInactivityFilter');
+    usersCustomInactivityWrap = document.getElementById('usersCustomInactivityWrap');
+    usersCustomInactivityValue = document.getElementById('usersCustomInactivityValue');
+    usersCustomInactivityUnit = document.getElementById('usersCustomInactivityUnit');
+    usersAdvancedFiltersBtn = document.getElementById('usersAdvancedFiltersBtn');
+    usersAdvancedFilters = document.getElementById('usersAdvancedFilters');
+    usersActiveFiltersCount = document.getElementById('usersActiveFiltersCount');
+    usersClearFiltersBtn = document.getElementById('usersClearFiltersBtn');
+    usersSelectionTabBtn = document.getElementById('usersSelectionTabBtn');
+    guestUsersTabBtn = document.getElementById('guestUsersTabBtn');
+    notificationsHistoryTabBtn = document.getElementById('notificationsHistoryTabBtn');
+    usersSelectionView = document.getElementById('usersSelectionView');
+    guestsView = document.getElementById('guestsView');
+    notificationsHistoryView = document.getElementById('notificationsHistoryView');
+    usersToolsPanel = document.getElementById('usersToolsPanel');
+    guestsToolsPanel = document.getElementById('guestsToolsPanel');
+    usersPrimaryStatLabel = document.getElementById('usersPrimaryStatLabel');
+    usersSecondaryStatWrap = document.getElementById('usersSecondaryStatWrap');
+    usersSecondaryStatLabel = document.getElementById('usersSecondaryStatLabel');
+    guestsTableList = document.getElementById('guestsTableList');
+    guestsSearchInput = document.getElementById('guestsSearchInput');
+    guestUsersCountBadge = document.getElementById('guestUsersCount');
+    guestsAppVersionFilter = document.getElementById('guestsAppVersionFilter');
+    guestsInactivityFilter = document.getElementById('guestsInactivityFilter');
+    guestsPresenceFilter = document.getElementById('guestsPresenceFilter');
+    guestsCustomInactivityWrap = document.getElementById('guestsCustomInactivityWrap');
+    guestsCustomInactivityValue = document.getElementById('guestsCustomInactivityValue');
+    guestsCustomInactivityUnit = document.getElementById('guestsCustomInactivityUnit');
+    guestsAdvancedFiltersBtn = document.getElementById('guestsAdvancedFiltersBtn');
+    guestsAdvancedFilters = document.getElementById('guestsAdvancedFilters');
+    guestsActiveFiltersCount = document.getElementById('guestsActiveFiltersCount');
+    guestsClearFiltersBtn = document.getElementById('guestsClearFiltersBtn');
+    selectAllGuestUsers = document.getElementById('selectAllGuestUsers');
+    deleteSelectedGuestsBtn = document.getElementById('deleteSelectedGuestsBtn');
+    guestUserDetails = document.getElementById('guestUserDetails');
+    notificationsHistoryList = document.getElementById('notificationsHistoryList');
+    notificationHistoryDetails = document.getElementById('notificationHistoryDetails');
+    notificationsHistorySearchInput = document.getElementById('notificationsHistorySearchInput');
+    notificationsHistoryCount = document.getElementById('notificationsHistoryCount');
+    selectAllNotificationHistory = document.getElementById('selectAllNotificationHistory');
+    deleteSelectedNotificationsBtn = document.getElementById('deleteSelectedNotificationsBtn');
+    selectedNotificationsCount = document.getElementById('selectedNotificationsCount');
+    selectAllNotificationUsers = document.getElementById('selectAllNotificationUsers');
+    deleteSelectedUsersBtn = document.getElementById('deleteSelectedUsersBtn');
+    allUsersCount = document.getElementById('allUsersCount');
+    notificationSelectedCount = document.getElementById('notificationSelectedCount');
+    selectedUserDetails = document.getElementById('selectedUserDetails');
+    notificationTitleInput = document.getElementById('notificationTitleInput');
+    notificationBodyInput = document.getElementById('notificationBodyInput');
+    notificationLinkInput = document.getElementById('notificationLinkInput');
+    notificationCustomLinkInput = document.getElementById('notificationCustomLinkInput');
+    sendNotificationBtn = document.getElementById('sendNotificationBtn');
+    
+    // عناصر Modal التعديل
+    editModal = document.getElementById('editModal');
+    editMessageTextarea = document.getElementById('editMessageTextarea');
+    saveEditBtn = document.getElementById('saveEditBtn');
+    cancelEditBtn = document.getElementById('cancelEditBtn');
+    closeEditModalBtn = document.getElementById('closeEditModalBtn');
+    
+    console.log('✅ تم تهيئة جميع عناصر DOM بنجاح');
+}
 
 // ========== دوال تسجيل الدخول ==========
 function checkAuthState() {
-    window.onAuthStateChanged(auth, (user) => {
+    window.onAuthStateChanged(auth(), (user) => {
         if (user) {
             console.log('✅ مسجل دخول:', user.email);
             loginContainer.style.display = 'none';
@@ -166,7 +384,7 @@ async function handleLogin(email, password) {
     loginError.style.display = 'none';
     
     try {
-        await window.signInWithEmailAndPassword(auth, email, password);
+        await window.signInWithEmailAndPassword(auth(), email, password);
         console.log('✅ تم تسجيل الدخول بنجاح');
     } catch (error) {
         console.error('❌ خطأ في تسجيل الدخول:', error);
@@ -191,7 +409,7 @@ async function handleLogin(email, password) {
 
 async function handleLogout() {
     try {
-        await window.signOut(auth);
+        await window.signOut(auth());
         console.log('✅ تم تسجيل الخروج');
         showToast('تم تسجيل الخروج بنجاح');
     } catch (error) {
@@ -205,6 +423,15 @@ function resetLoginForm() {
     passwordInput.value = '';
     loginError.style.display = 'none';
     if (emailInput) emailInput.focus();
+}
+
+function disableBrowserAutofill(input) {
+    if (!input || input.dataset.autofillGuard === '1') return;
+    input.dataset.autofillGuard = '1';
+    input.setAttribute('autocomplete', 'off');
+    input.setAttribute('readonly', 'readonly');
+    input.addEventListener('focus', () => input.removeAttribute('readonly'));
+    input.addEventListener('mousedown', () => input.removeAttribute('readonly'));
 }
 
 // ========== دوال مساعدة ==========
@@ -735,6 +962,126 @@ function getUserLocationText(user = {}) {
     return '';
 }
 
+// ========== دوال معلومات الشاشة والجهاز ==========
+function getScreenDimensions(user = {}) {
+    const resolution = readUserValue(user, [
+        'screenResolution',
+        'screen_resolution',
+        'displayResolution',
+        'display_resolution',
+        'resolution',
+        'screenWidth',
+        'screen_width',
+        'displayWidth',
+        'display_width',
+        'deviceWidth',
+        'device_width',
+        'width'
+    ]);
+    
+    if (resolution) {
+        return String(resolution);
+    }
+    return '';
+}
+
+function getScreenSizeInInches(user = {}) {
+    const screenSize = readUserValue(user, [
+        'screenInches',
+        'screen_inches',
+        'screenSize',
+        'screen_size',
+        'screenSizeInches',
+        'screen_size_inches',
+        'diagonalSize',
+        'diagonal_size',
+        'screenDiagonal'
+    ]);
+    
+    if (screenSize) {
+        return String(screenSize);
+    }
+    return '';
+}
+
+function getScreenDPI(user = {}) {
+    const dpi = readUserValue(user, [
+        'screenDPI',
+        'screen_dpi',
+        'dpi',
+        'displayDPI',
+        'display_dpi',
+        'densityDPI',
+        'density_dpi',
+        'logicalDensityDpi'
+    ]);
+    
+    if (dpi) {
+        return String(dpi);
+    }
+    return '';
+}
+
+function getScreenDP(user = {}) {
+    const dp = readUserValue(user, [
+        'screenDP',
+        'screen_dp',
+        'dp',
+        'displayDP',
+        'display_dp',
+        'devicePixels',
+        'device_pixels',
+        'scaledDensity'
+    ]);
+    
+    if (dp) {
+        return String(dp);
+    }
+    return '';
+}
+
+function getScreenDensity(user = {}) {
+    const density = readUserValue(user, [
+        'screenDensity',
+        'screen_density',
+        'density',
+        'displayDensity',
+        'display_density',
+        'densityName',
+        'density_name',
+        'densityCategory'
+    ]);
+    
+    if (density) {
+        return String(density);
+    }
+    return '';
+}
+
+function getAndroidVersion(user = {}) {
+    const osVersion = readUserValue(user, [
+        'androidVersion',
+        'android_version',
+        'osVersion',
+        'os_version',
+        'version',
+        'sdkVersion',
+        'sdk_version',
+        'apiLevel',
+        'api_level',
+        'buildVersion',
+        'build_version',
+        'systemVersion',
+        'system_version',
+        'releaseVersion'
+    ]);
+    
+    if (osVersion) {
+        return String(osVersion);
+    }
+    return '';
+}
+
 function getUserAvatarUrl(user = {}) {
     const profile = user.profile || user.userProfile || user.account || {};
     return safeMediaUrl(
@@ -1200,6 +1547,146 @@ function getUserEmail(user = {}) {
     return user.userEmail || user.email || user.accountEmail || '';
 }
 
+function isGuestUser(user = {}) {
+    if (user.isGuest === true || user.isAnonymous === true) return true;
+    if (user.isRegistered === false || user.registered === false) return true;
+
+    const accountType = String(
+        user.accountType || user.userType || user.authProvider || user.providerId || user.provider || ''
+    ).toLowerCase();
+    if (['guest', 'anonymous', 'guest_user', 'guestuser'].includes(accountType)) return true;
+
+    const key = getUserKey(user);
+    const docId = String(user.id || '').trim();
+    if (key === 'guest' || docId === 'guest') return true;
+
+    return false;
+}
+
+function getGuestKey(user = {}) {
+    const candidates = [
+        user.anonymousUid,
+        user.guestId,
+        user.id,
+        user.sessionId,
+        user.deviceId,
+        user.installationId,
+        user.uid,
+        user.userId
+    ].map(value => String(value || '').trim()).filter(Boolean);
+
+    const realUid = candidates.find(value => value !== 'guest');
+    if (realUid) return realUid;
+
+    return candidates[0] || '';
+}
+
+function normalizeGuestDoc(docId, data = {}) {
+    const id = String(docId || data.anonymousUid || data.guestId || '').trim();
+    return {
+        ...data,
+        id: id || docId,
+        guestId: id || docId,
+        anonymousUid: data.anonymousUid || id || docId,
+        isGuest: true
+    };
+}
+
+function shouldIncludeAppUserAsGuest(user = {}) {
+    if (isGuestUser(user)) return true;
+    if (String(user.anonymousUid || '').trim() && String(user.anonymousUid).trim() !== 'guest') return true;
+    if (user.isGuest === true || user.isAnonymous === true) return true;
+    return false;
+}
+
+function mergeGuestIntoMap(merged, rawUser) {
+    const key = getGuestKey(rawUser);
+    if (!key) return;
+    const existing = merged.get(key) || {};
+    merged.set(key, { ...existing, ...rawUser, guestUserId: key, isGuest: true });
+}
+
+function buildGuestUsersList() {
+    const merged = new Map();
+
+    guestUsers.forEach(rawUser => mergeGuestIntoMap(merged, rawUser));
+
+    appUsers.forEach(rawUser => {
+        if (shouldIncludeAppUserAsGuest(rawUser)) mergeGuestIntoMap(merged, rawUser);
+    });
+
+    return [...merged.values()].sort((a, b) => {
+        const activityA = getGuestLastSeenAt(a);
+        const activityB = getGuestLastSeenAt(b);
+        return activityB - activityA || getGuestDisplayName(a).localeCompare(getGuestDisplayName(b), 'ar');
+    });
+}
+
+function formatGuestUid(uid = '') {
+    const value = String(uid || '').trim();
+    if (!value || value === 'guest') return 'بدون معرف';
+    if (value.length <= 12) return value;
+    return `${value.slice(0, 6)}…${value.slice(-4)}`;
+}
+
+function getGuestDisplayName(user = {}) {
+    return 'مستخدم ضيف';
+}
+
+function getGuestSubtitle(user = {}) {
+    const key = getGuestKey(user);
+    const version = getAppVersion(user);
+    const parts = [];
+    if (key && key !== 'guest') parts.push(formatGuestUid(key));
+    if (version) parts.push(`v${version}`);
+    return parts.join(' • ') || 'غير مسجل';
+}
+
+function getGuestFirstSeenAt(user = {}) {
+    const keys = ['createdAt', 'firstSeenAt', 'firstOpenAt', 'registeredAt', 'joinedAt'];
+    return Math.max(...keys.map(key => toMillis(readUserValue(user, [key]))), 0);
+}
+
+function getGuestLastSeenAt(user = {}) {
+    return getLastActivityAt(user);
+}
+
+function getGuestPresenceState(user = {}) {
+    const lastSeenAt = getGuestLastSeenAt(user);
+    const now = Date.now();
+
+    if (!lastSeenAt) {
+        return { className: 'offline', text: 'لا يوجد آخر ظهور' };
+    }
+
+    const diff = now - lastSeenAt;
+    if (diff <= ONLINE_HEARTBEAT_TIMEOUT) {
+        return { className: 'active-app', text: 'متصل الآن' };
+    }
+    if (diff <= 86400000) {
+        return { className: 'active-app', text: `نشط اليوم - ${formatTime(lastSeenAt)}` };
+    }
+
+    return { className: 'offline', text: `آخر ظهور ${formatInactiveSince(lastSeenAt)}` };
+}
+
+function buildAllMergedUsers() {
+    const merged = new Map();
+
+    [...appUsers, ...allUsers].forEach(rawUser => {
+        const key = getUserKey(rawUser);
+        if (!key) return;
+        const existing = merged.get(key) || {};
+        merged.set(key, { ...existing, ...rawUser, notificationUserId: key });
+    });
+
+    return [...merged.values()].sort((a, b) => {
+        const usageA = getUsageStats(a).daily;
+        const usageB = getUsageStats(b).daily;
+        return usageB - usageA || getDisplayName(a).localeCompare(getDisplayName(b), 'ar');
+    });
+}
+
 function findUsersByKey(userKey) {
     return {
         reports: allUsers.filter(user => getUserKey(user) === userKey),
@@ -1398,20 +1885,7 @@ function formatUsage(minutes) {
 }
 
 function buildNotificationUsers() {
-    const merged = new Map();
-
-    [...appUsers, ...allUsers].forEach(rawUser => {
-        const key = getUserKey(rawUser);
-        if (!key) return;
-        const existing = merged.get(key) || {};
-        merged.set(key, { ...existing, ...rawUser, notificationUserId: key });
-    });
-
-    return [...merged.values()].sort((a, b) => {
-        const usageA = getUsageStats(a).daily;
-        const usageB = getUsageStats(b).daily;
-        return usageB - usageA || getDisplayName(a).localeCompare(getDisplayName(b), 'ar');
-    });
+    return buildAllMergedUsers().filter(user => !isGuestUser(user));
 }
 
 function syncAppVersionFilterOptions(users = buildNotificationUsers()) {
@@ -1460,12 +1934,83 @@ function getFilteredNotificationUsers() {
     });
 }
 
+function populateSettingsAccount() {
+    const user = auth().currentUser;
+    if (!user) return;
+
+    if (accountEmail) accountEmail.textContent = user.email || '—';
+    if (accountUsername) accountUsername.textContent = user.displayName || '—';
+    if (accountCreatedDate && user.metadata?.creationTime) {
+        accountCreatedDate.textContent = new Date(user.metadata.creationTime).toLocaleDateString('ar-SA');
+    }
+    if (settingsEmailValue) settingsEmailValue.textContent = user.email || '—';
+}
+
+function resetPasswordForm() {
+    if (currentPassword) currentPassword.value = '';
+    if (newPassword) newPassword.value = '';
+    if (confirmNewPassword) confirmNewPassword.value = '';
+    if (passwordChangeError) passwordChangeError.style.display = 'none';
+}
+
+function scrollSettingsNavToActive() {
+    const activeItem = document.querySelector('.settings-nav-item.active');
+    if (!activeItem) return;
+
+    requestAnimationFrame(() => {
+        activeItem.scrollIntoView({
+            behavior: 'smooth',
+            inline: 'center',
+            block: 'nearest'
+        });
+    });
+}
+
+function setSettingsPanel(panel) {
+    activeSettingsPanel = panel;
+
+    document.querySelectorAll('.settings-nav-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.panel === panel);
+    });
+
+    document.querySelectorAll('.settings-panel-new').forEach(panelEl => {
+        panelEl.classList.toggle('active', panelEl.dataset.panel === panel);
+    });
+
+    const settingsContent = document.getElementById('settingsContent');
+    if (settingsContent) settingsContent.scrollTop = 0;
+
+    scrollSettingsNavToActive();
+
+    if (panel === 'account' || panel === 'email' || panel === 'hub') {
+        populateSettingsAccount();
+    }
+
+    if (panel === 'password') {
+        resetPasswordForm();
+    }
+
+    if (panel === 'shortcuts') {
+        displayShortcuts();
+    }
+}
+
+function openSettings(panel = 'hub') {
+    setActiveView('settings');
+    setSettingsPanel(panel);
+}
+
 function setActiveView(view) {
     activeView = view;
     const isUsers = view === 'users';
     const isDashboard = view === 'dashboard';
+    const isSettings = view === 'settings';
+
+    // إغلاق القائمة الجانبية تلقائياً عند تغيير الصفحة
+    closeMobileSidebar();
 
     if (usersPage) usersPage.style.display = isUsers ? 'flex' : 'none';
+    if (settingsPage) settingsPage.style.display = isSettings ? 'flex' : 'none';
     if (dashboardPage) {
         dashboardPage.style.display = isDashboard ? 'flex' : 'none';
         if (isDashboard) {
@@ -1494,14 +2039,19 @@ function setActiveView(view) {
     }
     
     const chatMain = document.querySelector('.chat-main');
-    if (chatMain) chatMain.style.display = (isUsers || isDashboard) ? 'none' : 'flex';
+    if (chatMain) chatMain.style.display = (isUsers || isDashboard || isSettings) ? 'none' : 'flex';
     
     if (chatViewBtn) chatViewBtn.classList.toggle('active', view === 'chat');
     if (usersViewBtn) usersViewBtn.classList.toggle('active', view === 'users');
     if (dashboardViewBtn) dashboardViewBtn.classList.toggle('active', view === 'dashboard');
+
+    if (isSettings) {
+        populateSettingsAccount();
+    }
     
     if (isUsers) {
         if (activeUsersPanel === 'history') renderNotificationHistory();
+        else if (activeUsersPanel === 'guests') renderGuestUsers();
         else renderNotificationUsers();
     }
 }
@@ -1556,141 +2106,809 @@ function sendDataToDashboard() {
 }
 
 function loadUsers() {
-    const q = query(collection(db, COLLECTION_NAME));
+    const q = query(collection(db(), COLLECTION_NAME));
+    let retryCount = 0;
+    const maxRetries = 3;
     
-    onSnapshot(q, async (snapshot) => {
-        allUsers = [];
-        console.log('📊 عدد التقارير:', snapshot.size);
+    const attemptLoad = () => {
+        retryCount++;
+        console.log(`📊 محاولة تحميل البيانات #${retryCount}...`);
         
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            const messages = data.messages || [];
-            const lastMessage = messages[messages.length - 1];
+        onSnapshot(q, async (snapshot) => {
+            allUsers = [];
+            console.log('📊 عدد التقارير:', snapshot.size);
             
-            allUsers.push({
-                id: doc.id,
-                ...data,
-                lastMessageText: getReportPreview(data, lastMessage),
-                lastMessageTime: lastMessage?.timestamp || data.timestamp || 0,
-                unreadCount: getUnreadCount(data, messages)
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                const messages = data.messages || [];
+                const lastMessage = messages[messages.length - 1];
+                
+                // طباعة البيانات الخام الأولى من Firebase فقط
+                if (allUsers.length === 0) {
+                    console.log('🔥 البيانات الخام الأولى من Firebase:', data);
+                    console.log('🔍 هل توجد screenResolution؟', 'screenResolution' in data);
+                    console.log('🔍 هل توجد androidVersion؟', 'androidVersion' in data);
+                    console.log('🔍 هل توجد screenInches؟', 'screenInches' in data);
+                    console.log('🔍 قائمة كاملة بالمفاتيح (المفاتيح الأولى 15):', Object.keys(data).slice(0, 15));
+                }
+                
+                // التحقق من كل التقارير
+                const reportNum = allUsers.length + 1;
+                console.log(`📋 التقرير ${reportNum} - هل يحتوي على البيانات الجديدة؟`, {
+                    reportId: data.reportId,
+                    hasAndroidVersion: 'androidVersion' in data,
+                    hasScreenResolution: 'screenResolution' in data,
+                    hasScreenInches: 'screenInches' in data,
+                    hasScreenDPI: 'screenDPI' in data,
+                    hasScreenDP: 'screenDP' in data,
+                    hasScreenDensity: 'screenDensity' in data
+                });
+                
+                // طباعة البيانات الشاملة للتحقق من وجود معلومات الشاشة والجهاز
+                if (data.screenResolution || data.screenInches || data.screenDPI || data.androidVersion) {
+                    console.log('🖥️ بيانات جهاز محدثة للتقرير:', {
+                        reportId: data.reportId,
+                        screenResolution: data.screenResolution,
+                        screenInches: data.screenInches,
+                        screenDP: data.screenDP,
+                        screenDPI: data.screenDPI,
+                        screenDensity: data.screenDensity,
+                        androidVersion: data.androidVersion
+                    });
+                }
+                
+                // طباعة أول 10 تقارير مع كل حقولها
+                console.log(`📋 التقرير ${allUsers.length + 1}:`, {
+                    reportId: data.reportId,
+                    userName: data.userName,
+                    android: data.androidVersion,
+                    screen: data.screenResolution,
+                    keyCount: Object.keys(data).length
+                });
+                
+                allUsers.push({
+                    id: doc.id,
+                    ...data,
+                    lastMessageText: getReportPreview(data, lastMessage),
+                    lastMessageTime: lastMessage?.timestamp || data.timestamp || 0,
+                    unreadCount: getUnreadCount(data, messages)
+                });
             });
+            
+            // طباعة أول تقرير مع كل مفاتيحه
+            if (allUsers.length > 0) {
+                console.log('✅ عدد التقارير المحملة:', allUsers.length);
+                console.log('📋 التقرير الأول - جميع المفاتيح:', Object.keys(allUsers[0]));
+                console.log('📋 بيانات التقرير الأول:', allUsers[0]);
+                
+                // طباعة المفاتيح الجديدة بشكل صريح
+                const firstReport = allUsers[0];
+                console.log('🆕 المفاتيح الجديدة - قيم مباشرة:');
+                console.log('  androidVersion:', firstReport.androidVersion);
+                console.log('  screenResolution:', firstReport.screenResolution);
+                console.log('  screenInches:', firstReport.screenInches);
+                console.log('  screenDP:', firstReport.screenDP);
+                console.log('  screenDPI:', firstReport.screenDPI);
+                console.log('  screenDensity:', firstReport.screenDensity);
+            }
+            
+            allUsers.sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
+            selectedConversationIds.forEach(id => {
+                if (!allUsers.some(user => user.id === id)) selectedConversationIds.delete(id);
+            });
+            
+            if (usersCountSpan) usersCountSpan.textContent = allUsers.length;
+            if (totalTicketsSpan) totalTicketsSpan.textContent = allUsers.filter(u => u.status !== 'Solved').length;
+            if (conversationsCountSpan) conversationsCountSpan.textContent = allUsers.filter(u => !u.archived).length;
+            
+            renderUsersList();
+            if (activeView === 'users') renderNotificationUsers();
+            // إرسال البيانات المحدّثة للوحة الإحصائيات إذا كانت مفتوحة
+            if (activeView === 'dashboard') sendDataToDashboard();
+            
+            if (allUsers.length === 0) {
+                console.warn('⚠️ لا توجد بيانات في قاعدة البيانات بعد!');
+            }
+        }, (error) => {
+            console.error(`❌ خطأ في تحميل البيانات (محاولة #${retryCount}):`, error);
+            
+            // محاولة إعادة الاتصال إذا كانت هناك محاولات متبقية
+            if (retryCount < maxRetries) {
+                console.log(`⏳ محاولة إعادة الاتصال بعد 3 ثواني... (${maxRetries - retryCount} محاولات متبقية)`);
+                setTimeout(attemptLoad, 3000);
+            } else {
+                showToast('❌ فشل الاتصال بـ Firebase بعد ' + maxRetries + ' محاولات. تأكد من الاتصال بالإنترنت.', true);
+            }
         });
-        
-        allUsers.sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
-        selectedConversationIds.forEach(id => {
-            if (!allUsers.some(user => user.id === id)) selectedConversationIds.delete(id);
-        });
-        
-        if (usersCountSpan) usersCountSpan.textContent = allUsers.length;
-        if (totalTicketsSpan) totalTicketsSpan.textContent = allUsers.filter(u => u.status !== 'Solved').length;
-        if (conversationsCountSpan) conversationsCountSpan.textContent = allUsers.length;
-        
-        renderUsersList();
-        if (activeView === 'users') renderNotificationUsers();
-        // إرسال البيانات المحدّثة للوحة الإحصائيات إذا كانت مفتوحة
-        if (activeView === 'dashboard') sendDataToDashboard();
-        
-        if (allUsers.length === 0) {
-            console.warn('⚠️ لا توجد بيانات في قاعدة البيانات بعد!');
-        }
-    }, (error) => {
-        console.error('❌ خطأ في تحميل البيانات:', error);
-        showToast('❌ خطأ في تحميل البيانات: ' + error.message, true);
-    });
+    };
+    
+    // بدء المحاولة الأولى
+    attemptLoad();
 }
 
 function loadAppUsers() {
-    const q = query(collection(db, USERS_COLLECTION_NAME));
+    const q = query(collection(db(), USERS_COLLECTION_NAME));
+    let retryCount = 0;
+    const maxRetries = 2;
 
-    onSnapshot(q, (snapshot) => {
-        appUsers = [];
-        snapshot.forEach(userDoc => {
-            appUsers.push({
-                id: userDoc.id,
-                uid: userDoc.id,
-                ...userDoc.data()
+    const attemptLoad = () => {
+        retryCount++;
+        console.log(`👥 محاولة تحميل بيانات المستخدمين #${retryCount}...`);
+
+        onSnapshot(q, (snapshot) => {
+            appUsers = [];
+            snapshot.forEach(userDoc => {
+                appUsers.push({
+                    id: userDoc.id,
+                    uid: userDoc.id,
+                    ...userDoc.data()
+                });
             });
-        });
 
-        selectedNotificationUserIds.forEach(id => {
-            if (!buildNotificationUsers().some(user => getUserKey(user) === id)) selectedNotificationUserIds.delete(id);
-        });
+            selectedNotificationUserIds.forEach(id => {
+                if (!buildNotificationUsers().some(user => getUserKey(user) === id)) selectedNotificationUserIds.delete(id);
+            });
 
-        if (activeView === 'users') renderNotificationUsers();
-        // إرسال البيانات المحدّثة للوحة الإحصائيات إذا كانت مفتوحة
-        if (activeView === 'dashboard') sendDataToDashboard();
-    }, (error) => {
-        console.warn('تعذر تحميل مجموعة users، سيتم الاعتماد على بيانات البلاغات فقط:', error);
-    });
+            if (guestUsersCountBadge) guestUsersCountBadge.textContent = buildGuestUsersList().length;
+            refreshGuestUsersUI();
+            if (activeView === 'users' && activeUsersPanel !== 'guests') {
+                renderNotificationUsers();
+            }
+            // إرسال البيانات المحدّثة للوحة الإحصائيات إذا كانت مفتوحة
+            if (activeView === 'dashboard') sendDataToDashboard();
+        }, (error) => {
+            console.warn(`تعذر تحميل مجموعة users (محاولة #${retryCount}):`, error);
+            
+            // محاولة إعادة الاتصال إذا كانت هناك محاولات متبقية
+            if (retryCount < maxRetries) {
+                console.log(`⏳ محاولة إعادة الاتصال بعد 2 ثانية... (${maxRetries - retryCount} محاولات متبقية)`);
+                setTimeout(attemptLoad, 2000);
+            }
+        });
+    };
+
+    attemptLoad();
+}
+
+function refreshGuestUsersUI() {
+    const count = buildGuestUsersList().length;
+    if (guestUsersCountBadge) guestUsersCountBadge.textContent = count;
+    if (activeView === 'users') {
+        if (activeUsersPanel === 'guests') renderGuestUsers();
+        else updateUsersPageStats();
+    }
+}
+
+async function fetchGuestUsersViaFunction() {
+    if (!functions() || !httpsCallable) return null;
+
+    try {
+        const callable = httpsCallable(functions(), 'listGuestUsers');
+        const result = await callable();
+        const list = Array.isArray(result.data) ? result.data : [];
+        return list.map(item => normalizeGuestDoc(item.id || item.anonymousUid, item));
+    } catch (error) {
+        console.warn('تعذر جلب الضيوف عبر Cloud Function:', error);
+        return null;
+    }
+}
+
+async function fetchGuestUsersDirectOnce() {
+    if (!getDocs) return [];
+
+    const snapshot = await getDocs(query(collection(db(), GUEST_USERS_COLLECTION_NAME)));
+    return snapshot.docs.map(docSnap => normalizeGuestDoc(docSnap.id, docSnap.data()));
+}
+
+function applyGuestUsers(rawList = []) {
+    guestUsers = rawList;
+    guestUsersLoadError = null;
+    console.log(`👤 تم تحديث قائمة الضيوف: ${guestUsers.length} مستند، ${buildGuestUsersList().length} بعد الدمج`);
+    refreshGuestUsersUI();
+}
+
+async function reloadGuestUsersFallback(reason = '') {
+    console.warn(`↻ محاولة جلب الضيوف بطرق بديلة${reason ? `: ${reason}` : ''}`);
+
+    try {
+        const directDocs = await fetchGuestUsersDirectOnce();
+        if (directDocs.length > 0) {
+            applyGuestUsers(directDocs);
+            return true;
+        }
+    } catch (error) {
+        console.warn('تعذر getDocs لـ guestUsers:', error);
+    }
+
+    const functionDocs = await fetchGuestUsersViaFunction();
+    if (functionDocs && functionDocs.length > 0) {
+        applyGuestUsers(functionDocs);
+        return true;
+    }
+
+    return false;
+}
+
+function loadGuestUsers(force = false) {
+    if (guestUsersListener) {
+        guestUsersListener();
+        guestUsersListener = null;
+    }
+
+    const q = query(collection(db(), GUEST_USERS_COLLECTION_NAME));
+    let retryCount = 0;
+    const maxRetries = 3;
+
+    const attemptLoad = () => {
+        retryCount++;
+        console.log(`👤 محاولة تحميل بيانات الضيوف #${retryCount}...`);
+
+        guestUsersListener = onSnapshot(q, async (snapshot) => {
+            guestUsersLoadError = null;
+            const loaded = [];
+            snapshot.forEach(userDoc => {
+                loaded.push(normalizeGuestDoc(userDoc.id, userDoc.data()));
+            });
+
+            console.log(`✅ guestUsers snapshot: ${loaded.length} مستند`);
+            applyGuestUsers(loaded);
+
+            if (loaded.length === 0 && retryCount === 1) {
+                await reloadGuestUsersFallback('المجموعة فارغة');
+            }
+        }, async (error) => {
+            guestUsersLoadError = error;
+            console.warn(`تعذر تحميل مجموعة guestUsers (محاولة #${retryCount}):`, error);
+
+            const recovered = await reloadGuestUsersFallback(error.code || error.message);
+            if (recovered) return;
+
+            if (retryCount < maxRetries) {
+                setTimeout(attemptLoad, 2000);
+                return;
+            }
+
+            refreshGuestUsersUI();
+        });
+    };
+
+    attemptLoad();
+
+    if (force) {
+        reloadGuestUsersFallback('تحديث يدوي');
+    }
 }
 
 function loadPageViews() {
-    const q = query(collection(db, 'pageViews'));
+    const q = query(collection(db(), 'pageViews'));
+    let retryCount = 0;
+    const maxRetries = 2;
 
-    onSnapshot(q, (snapshot) => {
-        pageViewsData = [];
-        snapshot.forEach(docSnap => {
-            pageViewsData.push({
-                id: docSnap.id,
-                ...docSnap.data()
+    const attemptLoad = () => {
+        retryCount++;
+        console.log(`📊 محاولة تحميل بيانات PageViews #${retryCount}...`);
+
+        onSnapshot(q, (snapshot) => {
+            pageViewsData = [];
+            snapshot.forEach(docSnap => {
+                pageViewsData.push({
+                    id: docSnap.id,
+                    ...docSnap.data()
+                });
             });
+            // إرسال البيانات المحدّثة للوحة الإحصائيات إذا كانت مفتوحة
+            if (activeView === 'dashboard') sendDataToDashboard();
+        }, (error) => {
+            console.warn(`تعذر تحميل مجموعة pageViews (محاولة #${retryCount}):`, error);
+            
+            // محاولة إعادة الاتصال إذا كانت هناك محاولات متبقية
+            if (retryCount < maxRetries) {
+                console.log(`⏳ محاولة إعادة الاتصال بعد 2 ثانية... (${maxRetries - retryCount} محاولات متبقية)`);
+                setTimeout(attemptLoad, 2000);
+            }
         });
-        // إرسال البيانات المحدّثة للوحة الإحصائيات إذا كانت مفتوحة
-        if (activeView === 'dashboard') sendDataToDashboard();
-    }, (error) => {
-        console.warn('تعذر تحميل مجموعة pageViews:', error);
-    });
+    };
+
+    attemptLoad();
 }
 
-function loadNotificationHistory(useFallback = false) {
+function sortNotificationHistory(items = []) {
+    return [...items].sort((a, b) => toMillis(b.createdAt || b.sentAt || b.processedAt) - toMillis(a.createdAt || a.sentAt || a.processedAt));
+}
+
+function applyNotificationHistorySnapshot(docs = []) {
+    notificationHistory = sortNotificationHistory(docs.map(requestDoc => ({
+        id: requestDoc.id,
+        ...requestDoc.data()
+    })));
+
+    selectedNotificationHistoryIds.forEach(id => {
+        if (!notificationHistory.some(item => item.id === id)) selectedNotificationHistoryIds.delete(id);
+    });
+    if (!notificationHistory.some(item => item.id === selectedNotificationHistoryId)) {
+        selectedNotificationHistoryId = notificationHistory[0]?.id || null;
+    }
+
+    if (activeUsersPanel === 'history') {
+        watchSelectedNotification(selectedNotificationHistoryId);
+    }
+
+    renderNotificationHistory();
+}
+
+function upsertNotificationHistoryItem(updatedItem = {}) {
+    if (!updatedItem.id) return;
+    const index = notificationHistory.findIndex(item => item.id === updatedItem.id);
+    if (index >= 0) notificationHistory[index] = updatedItem;
+    else notificationHistory.unshift(updatedItem);
+    notificationHistory = sortNotificationHistory(notificationHistory);
+}
+
+function stopWatchingSelectedNotification() {
+    if (selectedNotificationListener) selectedNotificationListener();
+    selectedNotificationListener = null;
+}
+
+function watchSelectedNotification(notificationId) {
+    stopWatchingSelectedNotification();
+    if (!notificationId) return;
+
+    selectedNotificationListener = onSnapshot(
+        doc(db(), NOTIFICATION_REQUESTS_COLLECTION, notificationId),
+        (snapshot) => {
+            if (!snapshot.exists()) return;
+            upsertNotificationHistoryItem({ id: snapshot.id, ...snapshot.data() });
+            if (notificationsHistoryCount) notificationsHistoryCount.textContent = notificationHistory.length;
+            if (activeUsersPanel !== 'history') return;
+            renderNotificationHistoryDetails();
+            renderNotificationHistoryListOnly();
+        },
+        (error) => console.warn('تعذر متابعة تحديثات الإشعار المحدد:', error)
+    );
+}
+
+function renderNotificationHistoryListOnly() {
+    if (!notificationsHistoryList) return;
+
+    const history = getFilteredNotificationHistory();
+    if (history.length === 0) return;
+
+    notificationsHistoryList.innerHTML = history.map(item => {
+        const recipients = getNotificationRecipients(item);
+        const analytics = getNotificationAnalytics(item);
+        const createdAt = formatNotificationDate(item.createdAt);
+        const statusText = getNotificationStatusText(item.status);
+        const checked = selectedNotificationHistoryIds.has(item.id);
+        return `
+            <div class="notification-history-card-new ${selectedNotificationHistoryId === item.id ? 'active' : ''} ${checked ? 'selected' : ''}" data-notification-id="${escapeAttribute(item.id)}">
+                <label class="notification-history-check-new" title="تحديد الإشعار">
+                    <input type="checkbox" class="notification-history-checkbox-new" data-notification-id="${escapeAttribute(item.id)}" ${checked ? 'checked' : ''}>
+                </label>
+                <div class="notification-history-card-content-new">
+                    <div class="notification-history-card-head-new">
+                        <strong>${escapeHtml(item.title || 'إشعار بدون عنوان')}</strong>
+                        <span>${escapeHtml(statusText)}</span>
+                    </div>
+                    <p>${escapeHtml(item.body || 'لا يوجد نص محفوظ لهذا الإشعار')}</p>
+                    <div class="notification-history-meta-new">
+                        <span>${escapeHtml(createdAt)}</span>
+                        <span>${recipients.length} مستلم</span>
+                        <span>${analytics.openedCount} مفتوح</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    bindNotificationHistoryListEvents(history);
+}
+
+function getNotificationHistoryErrorMessage(error) {
+    const code = String(error?.code || '').toLowerCase();
+    if (code.includes('permission-denied')) {
+        return 'تعذر قراءة سجل الإشعارات — أضف في Firestore Rules: <code>match /notificationRequests/{requestId} { allow read, write: if request.auth != null; }</code>';
+    }
+    return `تعذر تحميل سجل الإشعارات: ${escapeHtml(error?.message || 'خطأ غير معروف')}`;
+}
+
+async function refreshNotificationHistoryOnce() {
+    try {
+        const snapshot = await getDocs(query(collection(db(), NOTIFICATION_REQUESTS_COLLECTION), limit(200)));
+        notificationHistoryLoadError = null;
+        applyNotificationHistorySnapshot(snapshot.docs);
+        return true;
+    } catch (error) {
+        console.warn('تعذر تحديث سجل الإشعارات يدوياً:', error);
+        notificationHistoryLoadError = error;
+        renderNotificationHistory();
+        return false;
+    }
+}
+
+function loadNotificationHistory() {
     if (notificationHistoryListener) notificationHistoryListener();
 
-    const requestsRef = collection(db, NOTIFICATION_REQUESTS_COLLECTION);
-    const q = useFallback
-        ? query(requestsRef)
-        : query(requestsRef, orderBy('createdAt', 'desc'), limit(80));
+    const requestsRef = collection(db(), NOTIFICATION_REQUESTS_COLLECTION);
+    const q = query(requestsRef, limit(200));
 
     notificationHistoryListener = onSnapshot(q, (snapshot) => {
-        notificationHistory = [];
-        snapshot.forEach(requestDoc => {
-            notificationHistory.push({
-                id: requestDoc.id,
-                ...requestDoc.data()
-            });
-        });
+        notificationHistoryLoadError = null;
+        applyNotificationHistorySnapshot(snapshot.docs);
 
-        notificationHistory.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
-        selectedNotificationHistoryIds.forEach(id => {
-            if (!notificationHistory.some(item => item.id === id)) selectedNotificationHistoryIds.delete(id);
+        snapshot.docChanges().forEach(change => {
+            if (change.type !== 'modified') return;
+            if (change.doc.id !== selectedNotificationHistoryId) return;
+            if (activeUsersPanel !== 'history') return;
+            renderNotificationHistoryDetails();
+            renderNotificationHistoryListOnly();
         });
-        if (!notificationHistory.some(item => item.id === selectedNotificationHistoryId)) {
-            selectedNotificationHistoryId = notificationHistory[0]?.id || null;
-        }
-
-        renderNotificationHistory();
     }, (error) => {
         console.warn('تعذر تحميل سجل الإشعارات:', error);
-        if (!useFallback) {
-            loadNotificationHistory(true);
-            return;
-        }
-        if (notificationsHistoryList) {
-            notificationsHistoryList.innerHTML = '<div class="users-empty-new">تعذر تحميل سجل الإشعارات</div>';
-        }
+        notificationHistoryLoadError = error;
+        refreshNotificationHistoryOnce();
     });
 }
 
 function setUsersPanel(panel) {
     activeUsersPanel = panel;
     const isHistory = panel === 'history';
+    const isGuests = panel === 'guests';
+    const isSelection = panel === 'selection';
 
-    if (usersSelectionView) usersSelectionView.style.display = isHistory ? 'none' : 'grid';
+    if (usersSelectionView) usersSelectionView.style.display = isSelection ? 'grid' : 'none';
+    if (guestsView) guestsView.style.display = isGuests ? 'flex' : 'none';
     if (notificationsHistoryView) notificationsHistoryView.style.display = isHistory ? 'grid' : 'none';
-    if (usersSelectionTabBtn) usersSelectionTabBtn.classList.toggle('active', !isHistory);
+    if (usersToolsPanel) usersToolsPanel.style.display = isSelection ? '' : 'none';
+    if (guestsToolsPanel) guestsToolsPanel.style.display = isGuests ? '' : 'none';
+
+    if (usersSelectionTabBtn) usersSelectionTabBtn.classList.toggle('active', isSelection);
+    if (guestUsersTabBtn) guestUsersTabBtn.classList.toggle('active', isGuests);
     if (notificationsHistoryTabBtn) notificationsHistoryTabBtn.classList.toggle('active', isHistory);
 
-    if (isHistory) renderNotificationHistory();
-    else renderNotificationUsers();
+    updateUsersPageStats();
+
+    if (isHistory) {
+        watchSelectedNotification(selectedNotificationHistoryId);
+        if (notificationHistoryLoadError || notificationHistory.length === 0) refreshNotificationHistoryOnce();
+        renderNotificationHistory();
+    }
+    else if (isGuests) {
+        stopWatchingSelectedNotification();
+        loadGuestUsers(true);
+        renderGuestUsers();
+    }
+    else {
+        stopWatchingSelectedNotification();
+        renderNotificationUsers();
+    }
+}
+
+function updateUsersPageStats() {
+    const isGuests = activeUsersPanel === 'guests';
+    const isHistory = activeUsersPanel === 'history';
+    const guestList = buildGuestUsersList();
+    const registeredUsers = buildNotificationUsers();
+
+    if (allUsersCount) {
+        allUsersCount.textContent = isGuests ? guestList.length : registeredUsers.length;
+    }
+    if (usersPrimaryStatLabel) {
+        usersPrimaryStatLabel.textContent = isGuests ? 'ضيف' : 'مستخدم';
+    }
+    if (usersSecondaryStatWrap) {
+        usersSecondaryStatWrap.style.display = isSelectionPanelVisible() ? '' : 'none';
+    }
+    if (usersSecondaryStatLabel && notificationSelectedCount) {
+        if (isGuests) {
+            notificationSelectedCount.textContent = selectedGuestUserIds.size;
+            usersSecondaryStatLabel.textContent = 'محدد';
+        } else if (isHistory) {
+            notificationSelectedCount.textContent = selectedNotificationHistoryIds.size;
+            usersSecondaryStatLabel.textContent = 'محدد';
+        } else {
+            notificationSelectedCount.textContent = selectedNotificationUserIds.size;
+            usersSecondaryStatLabel.textContent = 'محدد';
+        }
+    }
+    if (guestUsersCountBadge) guestUsersCountBadge.textContent = guestList.length;
+}
+
+function isSelectionPanelVisible() {
+    return activeUsersPanel === 'selection' || activeUsersPanel === 'guests';
+}
+
+function getGuestCustomInactivityRangeDays() {
+    const value = guestsCustomInactivityValue ? Number(guestsCustomInactivityValue.value) : 1;
+    if (!Number.isFinite(value) || value <= 0) return { min: 1, max: 2 };
+    const unit = guestsCustomInactivityUnit ? guestsCustomInactivityUnit.value : 'days';
+    if (unit === 'weeks') return { min: value * 7, max: (value + 1) * 7 };
+    if (unit === 'months') return { min: value * 30, max: (value + 1) * 30 };
+    return { min: value, max: value + 1 };
+}
+
+function getGuestInactivityRangeDays() {
+    const value = guestsInactivityFilter ? guestsInactivityFilter.value : 'all';
+    if (value === 'custom') return getGuestCustomInactivityRangeDays();
+    if (value === '1') return { min: 1, max: 2 };
+    if (value === '2') return { min: 2, max: 3 };
+    if (value === '7') return { min: 7, max: 14 };
+    if (value === '30') return { min: 30, max: 60 };
+    const days = Number(value);
+    return Number.isFinite(days) && days > 0 ? { min: days, max: days + 1 } : null;
+}
+
+function updateGuestCustomInactivityVisibility() {
+    if (!guestsCustomInactivityWrap || !guestsInactivityFilter) return;
+    guestsCustomInactivityWrap.classList.toggle('hidden', guestsInactivityFilter.value !== 'custom');
+}
+
+function getActiveGuestFiltersCount() {
+    let count = 0;
+    if (guestsPresenceFilter && guestsPresenceFilter.value !== 'all') count += 1;
+    if (guestsAppVersionFilter && guestsAppVersionFilter.value !== 'all') count += 1;
+    if (guestsInactivityFilter && guestsInactivityFilter.value !== 'all') count += 1;
+    return count;
+}
+
+function updateGuestAdvancedFiltersUI() {
+    const count = getActiveGuestFiltersCount();
+    if (guestsAdvancedFiltersBtn) {
+        guestsAdvancedFiltersBtn.classList.toggle('active', count > 0);
+        guestsAdvancedFiltersBtn.setAttribute('aria-expanded', guestsAdvancedFilters && !guestsAdvancedFilters.classList.contains('hidden') ? 'true' : 'false');
+    }
+    if (guestsActiveFiltersCount) {
+        guestsActiveFiltersCount.textContent = count ? String(count) : '';
+        guestsActiveFiltersCount.style.display = count ? 'inline-flex' : 'none';
+    }
+    if (guestsClearFiltersBtn) guestsClearFiltersBtn.disabled = count === 0;
+}
+
+function toggleGuestAdvancedFilters() {
+    if (!guestsAdvancedFilters) return;
+    guestsAdvancedFilters.classList.toggle('hidden');
+    updateGuestAdvancedFiltersUI();
+}
+
+function resetGuestFilters() {
+    if (guestsPresenceFilter) guestsPresenceFilter.value = 'all';
+    if (guestsAppVersionFilter) guestsAppVersionFilter.value = 'all';
+    if (guestsInactivityFilter) guestsInactivityFilter.value = 'all';
+    if (guestsCustomInactivityValue) guestsCustomInactivityValue.value = '1';
+    if (guestsCustomInactivityUnit) guestsCustomInactivityUnit.value = 'days';
+    renderGuestUsers();
+}
+
+function syncGuestVersionFilterOptions(users = buildGuestUsersList()) {
+    if (!guestsAppVersionFilter) return;
+
+    const currentValue = guestsAppVersionFilter.value || 'all';
+    const versions = [...new Set(users.map(getAppVersion).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+    guestsAppVersionFilter.innerHTML = [
+        '<option value="all">كل الإصدارات</option>',
+        '<option value="unknown">بدون إصدار</option>',
+        ...versions.map(version => `<option value="${escapeAttribute(version)}">${escapeHtml(version)}</option>`)
+    ].join('');
+
+    guestsAppVersionFilter.value = [...versions, 'all', 'unknown'].includes(currentValue) ? currentValue : 'all';
+}
+
+function getFilteredGuestUsers() {
+    const search = guestsSearchInput ? guestsSearchInput.value.trim().toLowerCase() : '';
+    const presenceFilter = guestsPresenceFilter ? guestsPresenceFilter.value : 'all';
+    const appVersionFilter = guestsAppVersionFilter ? guestsAppVersionFilter.value : 'all';
+    const inactivityFilter = guestsInactivityFilter ? guestsInactivityFilter.value : 'all';
+    const inactivityRangeDays = getGuestInactivityRangeDays();
+
+    return buildGuestUsersList().filter(user => {
+        const appVersion = getAppVersion(user);
+        const lastSeenAt = getGuestLastSeenAt(user);
+        const inactiveDays = lastSeenAt ? (Date.now() - lastSeenAt) / 86400000 : 0;
+        const text = `${getGuestDisplayName(user)} ${getGuestKey(user)} ${appVersion} ${user.deviceModel || ''} ${user.platform || ''}`.toLowerCase();
+        const presence = getGuestPresenceState(user);
+        const matchesPresence =
+            presenceFilter === 'all' ||
+            (presenceFilter === 'online' && presence.className !== 'offline') ||
+            (presenceFilter === 'offline' && presence.className === 'offline');
+        const matchesVersion =
+            appVersionFilter === 'all' ||
+            (appVersionFilter === 'unknown' && !appVersion) ||
+            appVersion === appVersionFilter;
+        const matchesInactivity =
+            inactivityFilter === 'all' ||
+            (inactivityFilter === 'never' && !lastSeenAt) ||
+            (inactivityRangeDays && lastSeenAt > 0 && inactiveDays >= inactivityRangeDays.min && inactiveDays < inactivityRangeDays.max);
+
+        return text.includes(search) && matchesPresence && matchesVersion && matchesInactivity;
+    });
+}
+
+function updateGuestSelectionUI(guests = null) {
+    const visibleGuests = guests || getFilteredGuestUsers();
+    const visibleIds = visibleGuests.map(user => getGuestKey(user));
+    const selectedVisible = visibleIds.filter(id => selectedGuestUserIds.has(id)).length;
+
+    updateUsersPageStats();
+    if (deleteSelectedGuestsBtn) deleteSelectedGuestsBtn.disabled = selectedGuestUserIds.size === 0;
+    if (selectAllGuestUsers) {
+        selectAllGuestUsers.checked = visibleIds.length > 0 && selectedVisible === visibleIds.length;
+        selectAllGuestUsers.indeterminate = selectedVisible > 0 && selectedVisible < visibleIds.length;
+    }
+}
+
+function toggleSelectAllGuestUsers() {
+    const guests = getFilteredGuestUsers();
+    const shouldSelect = selectAllGuestUsers ? selectAllGuestUsers.checked : false;
+
+    guests.forEach(user => {
+        const key = getGuestKey(user);
+        if (shouldSelect) selectedGuestUserIds.add(key);
+        else selectedGuestUserIds.delete(key);
+    });
+
+    renderGuestUsers();
+}
+
+function updateGuestStats() {
+    updateUsersPageStats();
+}
+
+function renderGuestDetails() {
+    if (!guestUserDetails) return;
+
+    if (!selectedGuestUserId) {
+        guestUserDetails.innerHTML = '<div class="empty-user-details-new">اضغط على ضيف لعرض تفاصيله الكاملة.</div>';
+        return;
+    }
+
+    const user = buildGuestUsersList().find(item => getGuestKey(item) === selectedGuestUserId);
+    if (!user) {
+        guestUserDetails.innerHTML = '<div class="empty-user-details-new">تعذر العثور على بيانات هذا الضيف.</div>';
+        return;
+    }
+
+    const usage = getUsageStats(user);
+    const presence = getGuestPresenceState(user);
+    const lastSeenAt = getGuestLastSeenAt(user);
+    const firstSeenAt = getGuestFirstSeenAt(user);
+    const key = getGuestKey(user);
+    const appVersion = getAppVersion(user);
+
+    const detailRows = [
+        ['معرف الضيف', key],
+        ['Anonymous UID', user.anonymousUid || key],
+        ['إصدار التطبيق', appVersion || 'غير متوفر'],
+        ['الحالة', presence.text],
+        ['آخر استخدام', lastSeenAt ? `${formatInactiveSince(lastSeenAt)} - ${new Date(lastSeenAt).toLocaleString('ar-SA')}` : 'غير متوفر'],
+        ['أول ظهور', firstSeenAt ? new Date(firstSeenAt).toLocaleString('ar-SA') : 'غير متوفر']
+    ].filter(([, value]) => value);
+
+    guestUserDetails.innerHTML = `
+        <div class="selected-user-card-new">
+            <div class="selected-user-head-new">
+                <div class="selected-user-avatar-new guest-avatar-new">${renderUserAvatar(user, 'ض')}</div>
+                <div class="selected-user-title-new">
+                    <h3>${escapeHtml(getGuestDisplayName(user))}</h3>
+                    <p>${escapeHtml(getGuestSubtitle(user))}</p>
+                </div>
+            </div>
+            <div class="guest-details-badge-new">حساب ضيف</div>
+            <div class="selected-user-usage-new">
+                <div><strong>${formatUsage(usage.daily)}</strong><span>يومي</span></div>
+                <div><strong>${formatUsage(usage.weekly)}</strong><span>أسبوعي</span></div>
+                <div><strong>${formatUsage(usage.monthly)}</strong><span>شهري</span></div>
+            </div>
+            <div class="selected-user-details-grid-new">
+                ${detailRows.map(([label, value]) => `
+                    <div><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function renderGuestUsers() {
+    if (!guestsTableList) return;
+
+    syncGuestVersionFilterOptions();
+    updateGuestCustomInactivityVisibility();
+    updateGuestAdvancedFiltersUI();
+    updateGuestStats();
+
+    if (guestUsersLoadError) {
+        const isPermission = guestUsersLoadError.code === 'permission-denied';
+        guestsTableList.innerHTML = `<div class="users-empty-new">${isPermission
+            ? 'تعذر قراءة guestUsers — أضف في Firestore Rules: <code>allow read: if request.auth != null;</code> أو انشر Cloud Function listGuestUsers'
+            : `تعذر تحميل بيانات الضيوف: ${escapeHtml(guestUsersLoadError.message || 'خطأ غير معروف')}`}</div>`;
+        updateGuestSelectionUI([]);
+        renderGuestDetails();
+        return;
+    }
+
+    const guests = getFilteredGuestUsers();
+    updateUsersPageStats();
+
+    if (guests.length === 0) {
+        const rawCount = guestUsers.length;
+        const hint = rawCount > 0
+            ? `تم تحميل ${rawCount} مستند لكن لا يطابق أي منها الفلاتر الحالية`
+            : 'لا توجد بيانات ضيوف بعد — افتح التطبيق كضيف وتأكد من وجود مستندات في Firestore → guestUsers';
+        guestsTableList.innerHTML = `<div class="users-empty-new">${hint}</div>`;
+        updateGuestSelectionUI(guests);
+        renderGuestDetails();
+        return;
+    }
+
+    if (selectedGuestUserId && !guests.some(user => getGuestKey(user) === selectedGuestUserId)) {
+        selectedGuestUserId = null;
+    }
+
+    guestsTableList.innerHTML = guests.map(user => {
+        const key = getGuestKey(user);
+        const usage = getUsageStats(user);
+        const presence = getGuestPresenceState(user);
+        const appVersion = getAppVersion(user);
+        const lastSeenAt = getGuestLastSeenAt(user);
+        const checked = selectedGuestUserIds.has(key);
+
+        return `
+            <div class="user-row-new guest-row-new ${selectedGuestUserId === key ? 'active' : ''}" data-guest-key="${escapeAttribute(key)}">
+                <label class="user-row-check-new">
+                    <input type="checkbox" class="guest-user-checkbox" data-guest-key="${escapeAttribute(key)}" ${checked ? 'checked' : ''}>
+                </label>
+                <div class="user-row-profile-new">
+                    <div class="user-row-avatar-new guest-avatar-new">${renderUserAvatar(user, 'ض')}</div>
+                    <div>
+                        <strong>${escapeHtml(getGuestDisplayName(user))}</strong>
+                        <span>${escapeHtml(getGuestSubtitle(user))}</span>
+                    </div>
+                </div>
+                <div class="usage-pill-new" data-label="اليومي">${formatUsage(usage.daily)}</div>
+                <div class="usage-pill-new" data-label="الأسبوعي">${formatUsage(usage.weekly)}</div>
+                <div class="usage-pill-new" data-label="الشهري">${formatUsage(usage.monthly)}</div>
+                <div class="usage-pill-new" data-label="الإصدار">${escapeHtml(appVersion || 'غير متوفر')}</div>
+                <div class="usage-pill-new" data-label="آخر استخدام" title="${lastSeenAt ? escapeHtml(new Date(lastSeenAt).toLocaleString('ar-SA')) : ''}">${lastSeenAt ? formatInactiveSince(lastSeenAt) : 'غير متوفر'}</div>
+                <div class="user-status-pill-new ${presence.className} status-tooltip-target" data-label="الحالة" data-full-status="${escapeAttribute(presence.text)}" aria-label="${escapeAttribute(presence.text)}">${escapeHtml(presence.text)}</div>
+            </div>
+        `;
+    }).join('');
+
+    updateGuestSelectionUI(guests);
+
+    document.querySelectorAll('.guest-user-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('click', event => event.stopPropagation());
+        checkbox.addEventListener('change', () => {
+            if (checkbox.checked) selectedGuestUserIds.add(checkbox.dataset.guestKey);
+            else selectedGuestUserIds.delete(checkbox.dataset.guestKey);
+            renderGuestUsers();
+        });
+    });
+
+    document.querySelectorAll('.guest-row-new .user-row-check-new').forEach(area => {
+        area.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const checkbox = area.querySelector('.guest-user-checkbox');
+            if (!checkbox) return;
+            const guestKey = checkbox.dataset.guestKey;
+            if (selectedGuestUserIds.has(guestKey)) {
+                selectedGuestUserIds.delete(guestKey);
+            } else {
+                selectedGuestUserIds.add(guestKey);
+            }
+            renderGuestUsers();
+        });
+    });
+
+    document.querySelectorAll('.guest-row-new').forEach(row => {
+        row.addEventListener('click', () => {
+            selectedGuestUserId = row.dataset.guestKey || null;
+            renderGuestUsers();
+        });
+    });
+
+    renderGuestDetails();
 }
 
 function getNotificationRecipients(notification = {}) {
@@ -1709,6 +2927,366 @@ function getRecipientTokensCount(recipient = {}) {
     if (recipient.tokens && typeof recipient.tokens === 'object') return Object.values(recipient.tokens).filter(Boolean).length;
     if (typeof recipient.tokens === 'string' && recipient.tokens.trim()) return 1;
     return 0;
+}
+
+const NOTIFICATION_RETURN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+function readTruthy(value) {
+    if (value === true || value === 1) return true;
+    if (value === false || value === 0 || value == null) return false;
+    const normalized = String(value).trim().toLowerCase();
+    return ['true', 'yes', '1', 'delivered', 'received', 'opened', 'clicked', 'sent', 'success', 'ok'].includes(normalized);
+}
+
+function getRecipientTokensList(recipient = {}) {
+    if (Array.isArray(recipient.tokens)) return recipient.tokens.filter(Boolean);
+    if (recipient.tokens && typeof recipient.tokens === 'object') return Object.values(recipient.tokens).filter(Boolean);
+    if (typeof recipient.tokens === 'string' && recipient.tokens.trim()) return [recipient.tokens.trim()];
+    return [];
+}
+
+function getRecipientStatsFromNotification(recipient = {}, notification = {}) {
+    const key = getRecipientKey(recipient);
+    const userId = String(recipient.userId || recipient.uid || '').trim();
+    const email = String(recipient.email || '').trim();
+    const maps = [
+        notification.recipientStats,
+        notification.recipientResults,
+        notification.tracking,
+        notification.recipientsStatus
+    ];
+
+    for (const map of maps) {
+        if (!map || typeof map !== 'object') continue;
+        const stats = map[key] || (userId && map[userId]) || (email && map[email]);
+        if (stats) return stats;
+    }
+    return null;
+}
+
+function isRecipientListed(recipient = {}, list = []) {
+    if (!Array.isArray(list)) return false;
+    const key = getRecipientKey(recipient);
+    const userId = String(recipient.userId || recipient.uid || '').trim();
+    const email = String(recipient.email || '').trim();
+    return list.some(item => item === key || item === userId || (email && item === email));
+}
+
+function getFailedTokensSet(notification = {}) {
+    const failed = new Set();
+    (Array.isArray(notification.errors) ? notification.errors : []).forEach(errorItem => {
+        if (errorItem?.token) failed.add(errorItem.token);
+    });
+    return failed;
+}
+
+function isNotificationSent(notification = {}) {
+    const status = String(notification.status || '').toLowerCase();
+    return ['sent', 'done', 'completed', 'processing'].includes(status);
+}
+
+function readNotificationCount(notification = {}, keys = [], fallback = 0) {
+    for (const key of keys) {
+        const value = notification[key];
+        if (typeof value === 'number' && Number.isFinite(value)) return value;
+    }
+    return fallback;
+}
+
+function getNotificationSentAt(notification = {}) {
+    return toMillis(
+        notification.sentAt || notification.sent_at || notification.deliveredAt ||
+        notification.delivered_at || notification.processedAt || notification.createdAt
+    );
+}
+
+function findNotificationUser(recipient = {}) {
+    const key = getRecipientKey(recipient);
+    if (!key) return null;
+    return buildAllMergedUsers().find(user => getUserKey(user) === key) || null;
+}
+
+function inferRecipientDeliveryFromFcm(recipient = {}, notification = {}) {
+    if (!isNotificationSent(notification)) return null;
+
+    const tokens = getRecipientTokensList(recipient);
+    const failedTokens = getFailedTokensSet(notification);
+    const successCount = readNotificationCount(notification, ['successCount', 'sentCount', 'deliveredCount'], 0);
+
+    if (tokens.length === 0) return 'no';
+    if (tokens.some(token => !failedTokens.has(token))) return 'yes';
+    if (tokens.every(token => failedTokens.has(token)) && failedTokens.size > 0) return 'no';
+    if (successCount > 0 && failedTokens.size === 0) return 'yes';
+    return null;
+}
+
+function inferRecipientStatusFromAggregate(recipient = {}, notification = {}, recipients = [], countKeys = []) {
+    if (recipients.length !== 1) return null;
+    const onlyRecipient = recipients[0];
+    if (getRecipientKey(onlyRecipient) !== getRecipientKey(recipient)) return null;
+
+    const count = readNotificationCount(notification, countKeys, 0);
+    if (count > 0) return 'yes';
+    if (isNotificationSent(notification)) return 'no';
+    return null;
+}
+
+function getRecipientReceivedStatus(recipient = {}, notification = {}) {
+    const stats = getRecipientStatsFromNotification(recipient, notification) || {};
+
+    if (
+        readTruthy(recipient.delivered) || readTruthy(recipient.received) || readTruthy(recipient.isDelivered) ||
+        readTruthy(stats.delivered) || readTruthy(stats.received)
+    ) return 'yes';
+
+    if (
+        recipient.delivered === false || recipient.received === false || recipient.isDelivered === false ||
+        stats.delivered === false || stats.received === false
+    ) return 'no';
+
+    const status = String(recipient.status || recipient.deliveryStatus || stats.status || '').toLowerCase();
+    if (['delivered', 'received', 'sent', 'success', 'ok'].includes(status)) return 'yes';
+    if (['failed', 'error', 'undelivered', 'rejected', 'invalid'].includes(status)) return 'no';
+
+    if (recipient.deliveredAt || recipient.receivedAt || recipient.delivered_at || stats.deliveredAt || stats.receivedAt) {
+        return 'yes';
+    }
+
+    if (isRecipientListed(recipient, notification.deliveredBy || notification.deliveredUsers || notification.receivedBy)) {
+        return 'yes';
+    }
+
+    const fcmStatus = inferRecipientDeliveryFromFcm(recipient, notification);
+    if (fcmStatus) return fcmStatus;
+
+    const recipients = getNotificationRecipients(notification);
+    const aggregateStatus = inferRecipientStatusFromAggregate(
+        recipient,
+        notification,
+        recipients,
+        ['deliveredCount', 'delivered_count', 'receivedCount', 'received_count', 'successCount', 'sentCount']
+    );
+    if (aggregateStatus) return aggregateStatus;
+
+    const notificationStatus = String(notification.status || '').toLowerCase();
+    if (notificationStatus === 'pending' || notificationStatus === 'processing') return 'pending';
+    if (notificationStatus === 'failed' || notificationStatus === 'error') return 'no';
+    return 'unknown';
+}
+
+function getRecipientOpenedStatus(recipient = {}, notification = {}) {
+    const stats = getRecipientStatsFromNotification(recipient, notification) || {};
+
+    if (
+        readTruthy(recipient.opened) || readTruthy(recipient.isOpened) || readTruthy(recipient.clicked) ||
+        readTruthy(stats.opened) || readTruthy(stats.clicked)
+    ) return 'yes';
+
+    if (recipient.opened === false || recipient.isOpened === false || stats.opened === false) return 'no';
+
+    const status = String(recipient.openStatus || recipient.clickStatus || stats.openStatus || stats.status || '').toLowerCase();
+    if (['opened', 'clicked', 'open'].includes(status)) return 'yes';
+
+    if (recipient.openedAt || recipient.opened_at || recipient.clickedAt || stats.openedAt || stats.clickedAt) {
+        return 'yes';
+    }
+
+    if (isRecipientListed(recipient, notification.openedBy || notification.openedUsers || notification.clickedBy)) {
+        return 'yes';
+    }
+
+    const recipients = getNotificationRecipients(notification);
+    const aggregateStatus = inferRecipientStatusFromAggregate(
+        recipient,
+        notification,
+        recipients,
+        ['openedCount', 'opened_count', 'openCount', 'open_count', 'clickCount']
+    );
+    if (aggregateStatus) return aggregateStatus;
+
+    const receivedStatus = getRecipientReceivedStatus(recipient, notification);
+    if (receivedStatus === 'yes') return 'no';
+    if (receivedStatus === 'pending') return 'pending';
+    return 'unknown';
+}
+
+function getRecipientReturnedStatus(recipient = {}, notification = {}) {
+    const stats = getRecipientStatsFromNotification(recipient, notification) || {};
+
+    if (readTruthy(recipient.returned) || readTruthy(recipient.isReturned) || readTruthy(stats.returned)) return 'yes';
+    if (recipient.returned === false || recipient.isReturned === false || stats.returned === false) return 'no';
+    if (recipient.returnedAt || recipient.returned_at || stats.returnedAt) return 'yes';
+
+    if (isRecipientListed(recipient, notification.returnedBy || notification.returnedUsers)) return 'yes';
+
+    const sentAt = getNotificationSentAt(notification);
+    if (!sentAt) return 'unknown';
+
+    const user = findNotificationUser(recipient);
+    if (!user) return 'unknown';
+
+    const lastActivity = getLastActivityAt(user);
+    if (lastActivity <= sentAt) return 'no';
+    return lastActivity - sentAt <= NOTIFICATION_RETURN_WINDOW_MS ? 'yes' : 'no';
+}
+
+function countRecipientsByStatus(recipients = [], notification = {}, statusFn) {
+    const counts = { yes: 0, no: 0, pending: 0, unknown: 0 };
+    recipients.forEach(recipient => {
+        const status = statusFn(recipient, notification);
+        counts[status] = (counts[status] || 0) + 1;
+    });
+    return counts;
+}
+
+function getNotificationAnalytics(notification = {}) {
+    const recipients = getNotificationRecipients(notification);
+    const targetCount = notification.recipientCount || recipients.length;
+    const receivedCounts = countRecipientsByStatus(recipients, notification, getRecipientReceivedStatus);
+    const openedCounts = countRecipientsByStatus(recipients, notification, getRecipientOpenedStatus);
+    const returnedCounts = countRecipientsByStatus(recipients, notification, getRecipientReturnedStatus);
+
+    const sentCount = readNotificationCount(notification, ['sentCount', 'sent_count', 'successCount'], 0) ||
+        receivedCounts.yes + receivedCounts.no ||
+        (isNotificationSent(notification) ? targetCount : 0);
+    const deliveredCount = Math.max(
+        readNotificationCount(notification, ['deliveredCount', 'delivered_count', 'receivedCount', 'received_count', 'successCount'], 0),
+        receivedCounts.yes
+    );
+    const openedCount = Math.max(
+        readNotificationCount(notification, ['openedCount', 'opened_count', 'openCount', 'open_count'], 0),
+        openedCounts.yes
+    );
+    const returnedCount = Math.max(
+        readNotificationCount(notification, ['returnedCount', 'returned_count'], 0),
+        returnedCounts.yes
+    );
+
+    return {
+        targetCount,
+        sentCount,
+        deliveredCount,
+        notDeliveredCount: Math.max(0, targetCount - deliveredCount),
+        openedCount,
+        notOpenedCount: Math.max(0, deliveredCount - openedCount),
+        returnedCount,
+        receivedCounts,
+        openedCounts,
+        returnedCounts,
+        sentAt: getNotificationSentAt(notification),
+        deliveryRate: targetCount ? Math.round((deliveredCount / targetCount) * 100) : 0,
+        openRate: deliveredCount ? Math.round((openedCount / deliveredCount) * 100) : 0,
+        returnRate: targetCount ? Math.round((returnedCount / targetCount) * 100) : 0
+    };
+}
+
+function renderNotificationStatusBadge(status = 'unknown', labels = {}) {
+    const config = {
+        yes: { text: labels.yes || 'نعم', className: 'success' },
+        no: { text: labels.no || 'لا', className: 'danger' },
+        pending: { text: labels.pending || 'بانتظار', className: 'pending' },
+        unknown: { text: labels.unknown || 'غير متوفر', className: 'muted' }
+    };
+    const item = config[status] || config.unknown;
+    return `<span class="notification-status-badge-new ${item.className}">${escapeHtml(item.text)}</span>`;
+}
+
+function getNotificationMetricIcon(type = '') {
+    const icons = {
+        sent: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>',
+        delivered: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17L4 12"/></svg>',
+        opened: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12S5 5 12 5s11 7 11 7-4 7-11 7S1 12 1 12Z"/><circle cx="12" cy="12" r="3"/></svg>',
+        returned: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>'
+    };
+    return icons[type] || icons.sent;
+}
+
+function renderNotificationAnalyticsPanel(analytics = {}) {
+    const metrics = [
+        { type: 'sent', label: 'مُرسل', value: analytics.sentCount || analytics.targetCount, total: analytics.targetCount, tone: 'blue' },
+        { type: 'delivered', label: 'تم استلامه', value: analytics.deliveredCount, total: analytics.targetCount, tone: 'green' },
+        { type: 'opened', label: 'تم فتحه', value: analytics.openedCount, total: Math.max(analytics.deliveredCount, analytics.targetCount), tone: 'purple' },
+        { type: 'returned', label: 'عاد للتطبيق', value: analytics.returnedCount, total: analytics.targetCount, tone: 'amber', hint: 'خلال 7 أيام' }
+    ];
+
+    return `
+        <div class="notification-analytics-panel-new">
+            <div class="notification-analytics-metrics-new">
+                ${metrics.map(metric => {
+                    const percent = metric.total ? Math.min(100, Math.round((metric.value / metric.total) * 100)) : 0;
+                    return `
+                        <div class="notification-analytics-metric-new tone-${metric.tone}">
+                            <div class="notification-analytics-metric-top-new">
+                                <span class="notification-analytics-icon-new">${getNotificationMetricIcon(metric.type)}</span>
+                                <div>
+                                    <span class="notification-analytics-label-new">${escapeHtml(metric.label)}</span>
+                                    <div class="notification-analytics-value-new">
+                                        <strong>${metric.value}</strong>
+                                        <small>من ${metric.total}</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="notification-analytics-progress-new" aria-hidden="true">
+                                <i style="width:${percent}%"></i>
+                            </div>
+                            ${metric.hint ? `<span class="notification-analytics-hint-new">${escapeHtml(metric.hint)}</span>` : ''}
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+            <div class="notification-analytics-rates-new">
+                <div class="notification-analytics-rate-new">
+                    <span>معدل الاستلام</span>
+                    <strong>${analytics.deliveryRate}%</strong>
+                </div>
+                <div class="notification-analytics-rate-new">
+                    <span>معدل الفتح</span>
+                    <strong>${analytics.openRate}%</strong>
+                </div>
+                <div class="notification-analytics-rate-new">
+                    <span>معدل العودة</span>
+                    <strong>${analytics.returnRate}%</strong>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderNotificationRecipientCard(recipient = {}, notification = {}) {
+    const key = getRecipientKey(recipient);
+    const name = recipient.name || key || 'مستخدم';
+    const subtitle = recipient.email || key || 'لا يوجد معرف';
+    const initial = escapeHtml(name.trim().charAt(0) || 'م');
+    const receivedStatus = getRecipientReceivedStatus(recipient, notification);
+    const openedStatus = getRecipientOpenedStatus(recipient, notification);
+    const returnedStatus = getRecipientReturnedStatus(recipient, notification);
+
+    return `
+        <div class="notification-recipient-card-new">
+            <div class="notification-recipient-head-new">
+                <div class="notification-recipient-avatar-new">${initial}</div>
+                <div class="notification-recipient-info-new">
+                    <strong>${escapeHtml(name)}</strong>
+                    <span>${escapeHtml(subtitle)}</span>
+                    <small>${getRecipientTokensCount(recipient)} رمز FCM</small>
+                </div>
+            </div>
+            <div class="notification-recipient-statuses-new">
+                <div class="notification-recipient-status-item-new">
+                    <span>استلام</span>
+                    ${renderNotificationStatusBadge(receivedStatus, { yes: 'تم الاستلام', no: 'لم يُستلم', pending: 'بانتظار', unknown: 'غير معروف' })}
+                </div>
+                <div class="notification-recipient-status-item-new">
+                    <span>فتح</span>
+                    ${renderNotificationStatusBadge(openedStatus, { yes: 'تم الفتح', no: 'لم يُفتح', pending: 'بانتظار', unknown: 'غير معروف' })}
+                </div>
+                <div class="notification-recipient-status-item-new">
+                    <span>عودة</span>
+                    ${renderNotificationStatusBadge(returnedStatus, { yes: 'عاد', no: 'لم يعد', unknown: 'غير معروف' })}
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 function getNotificationSearchText(notification = {}) {
@@ -1757,6 +3335,14 @@ function renderNotificationHistory() {
         return;
     }
 
+    if (notificationHistoryLoadError) {
+        notificationsHistoryList.innerHTML = `<div class="users-empty-new">${getNotificationHistoryErrorMessage(notificationHistoryLoadError)}</div>`;
+        if (notificationHistoryDetails) {
+            notificationHistoryDetails.innerHTML = '<div class="empty-user-details-new">تعذر تحميل تفاصيل الإشعارات.</div>';
+        }
+        return;
+    }
+
     const history = getFilteredNotificationHistory();
     if (history.length === 0) {
         notificationsHistoryList.innerHTML = '<div class="users-empty-new">لا توجد إشعارات مطابقة</div>';
@@ -1769,38 +3355,19 @@ function renderNotificationHistory() {
 
     if (!history.some(item => item.id === selectedNotificationHistoryId)) {
         selectedNotificationHistoryId = history[0]?.id || null;
+        watchSelectedNotification(selectedNotificationHistoryId);
     }
 
-    notificationsHistoryList.innerHTML = history.map(item => {
-        const recipients = getNotificationRecipients(item);
-        const createdAt = formatNotificationDate(item.createdAt);
-        const statusText = getNotificationStatusText(item.status);
-        const checked = selectedNotificationHistoryIds.has(item.id);
-        return `
-            <div class="notification-history-card-new ${selectedNotificationHistoryId === item.id ? 'active' : ''} ${checked ? 'selected' : ''}" data-notification-id="${escapeAttribute(item.id)}">
-                <label class="notification-history-check-new" title="تحديد الإشعار">
-                    <input type="checkbox" class="notification-history-checkbox-new" data-notification-id="${escapeAttribute(item.id)}" ${checked ? 'checked' : ''}>
-                </label>
-                <div class="notification-history-card-content-new">
-                    <div class="notification-history-card-head-new">
-                        <strong>${escapeHtml(item.title || 'إشعار بدون عنوان')}</strong>
-                        <span>${escapeHtml(statusText)}</span>
-                    </div>
-                    <p>${escapeHtml(item.body || 'لا يوجد نص محفوظ لهذا الإشعار')}</p>
-                    <div class="notification-history-meta-new">
-                        <span>${escapeHtml(createdAt)}</span>
-                        <span>${recipients.length} مستلم</span>
-                    </div>
-                </div>
-            </div>
-        `;
-    }).join('');
-
+    renderNotificationHistoryListOnly();
     updateNotificationHistorySelectionUI(history);
+    renderNotificationHistoryDetails();
+}
 
+function bindNotificationHistoryListEvents(history = []) {
     document.querySelectorAll('.notification-history-card-new').forEach(card => {
         card.addEventListener('click', () => {
             selectedNotificationHistoryId = card.dataset.notificationId;
+            watchSelectedNotification(selectedNotificationHistoryId);
             renderNotificationHistory();
         });
     });
@@ -1826,8 +3393,6 @@ function renderNotificationHistory() {
             renderNotificationHistory();
         });
     });
-
-    renderNotificationHistoryDetails();
 }
 
 function updateNotificationHistorySelectionUI(visibleHistory = null) {
@@ -1869,7 +3434,7 @@ async function deleteNotificationsByIds(ids = []) {
 
     try {
         if (deleteSelectedNotificationsBtn) deleteSelectedNotificationsBtn.disabled = true;
-        await Promise.all(ids.map(id => deleteDoc(doc(db, NOTIFICATION_REQUESTS_COLLECTION, id))));
+        await Promise.all(ids.map(id => deleteDoc(doc(db(), NOTIFICATION_REQUESTS_COLLECTION, id))));
 
         ids.forEach(id => selectedNotificationHistoryIds.delete(id));
         if (selectedNotificationHistoryId && ids.includes(selectedNotificationHistoryId)) {
@@ -1897,20 +3462,10 @@ function renderNotificationHistoryDetails() {
     }
 
     const recipients = getNotificationRecipients(item);
+    const analytics = getNotificationAnalytics(item);
     const safeLink = safeNotificationHref(item.link);
     const recipientRows = recipients.length
-        ? recipients.map(recipient => {
-            const key = getRecipientKey(recipient);
-            return `
-                <div class="notification-recipient-row-new">
-                    <div>
-                        <strong>${escapeHtml(recipient.name || key || 'مستخدم')}</strong>
-                        <span>${escapeHtml(recipient.email || key || 'لا يوجد معرف')}</span>
-                    </div>
-                    <small>${getRecipientTokensCount(recipient)} رمز</small>
-                </div>
-            `;
-        }).join('')
+        ? recipients.map(recipient => renderNotificationRecipientCard(recipient, item)).join('')
         : '<div class="users-empty-new">لا توجد قائمة مستلمين محفوظة لهذا الإشعار</div>';
 
     notificationHistoryDetails.innerHTML = `
@@ -1920,6 +3475,13 @@ function renderNotificationHistoryDetails() {
             <p>${escapeHtml(formatNotificationDate(item.createdAt))}</p>
         </div>
         <div class="notification-history-body-new">${escapeHtml(item.body || 'لا يوجد نص محفوظ لهذا الإشعار')}</div>
+        <div class="notification-history-analytics-new">
+            <div class="notification-history-analytics-head-new">
+                <strong>إحصائيات الإشعار</strong>
+                <span>${analytics.targetCount} مستلم</span>
+            </div>
+            ${renderNotificationAnalyticsPanel(analytics)}
+        </div>
         ${item.link ? (safeLink ? `<a class="notification-history-link-new" href="${escapeAttribute(safeLink)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.link)}</a>` : `<div class="notification-history-link-new">${escapeHtml(item.link)}</div>`) : ''}
         <div class="notification-history-actions-new">
             <button type="button" data-history-action="add" data-notification-id="${escapeAttribute(item.id)}">إضافة المستلمين للتحديد</button>
@@ -1928,7 +3490,7 @@ function renderNotificationHistoryDetails() {
             <button type="button" class="danger" data-history-action="delete" data-notification-id="${escapeAttribute(item.id)}">حذف هذا الإشعار نهائياً</button>
         </div>
         <div class="notification-recipients-head-new">
-            <strong>المستلمون</strong>
+            <strong>تفاصيل المستلمين</strong>
             <span>${recipients.length}</span>
         </div>
         <div class="notification-recipients-list-new">${recipientRows}</div>
@@ -1969,15 +3531,24 @@ function applyNotificationHistorySelection(notificationId, action) {
 
 function renderUsersList() {
     const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+    const isArchiveView = conversationsList && conversationsList.dataset.archiveView === 'true';
     const filteredUsers = allUsers.filter(user => {
         const searchText = (user.userName || user.userEmail || user.userId || '').toLowerCase();
-        return searchText.includes(searchTerm);
+        const matchesSearch = searchText.includes(searchTerm);
+        
+        // Filter by archive status
+        if (isArchiveView) {
+            return matchesSearch && user.archived === true;
+        } else {
+            return matchesSearch && user.archived !== true;
+        }
     });
     
     if (!conversationsList) return;
     
     if (filteredUsers.length === 0) {
-        conversationsList.innerHTML = '<div class="loading-state"><p>لا يوجد مستخدمين</p></div>';
+        const emptyMessage = isArchiveView ? 'لا يوجد محادثات في الأرشيف' : 'لا يوجد مستخدمين';
+        conversationsList.innerHTML = `<div class="loading-state"><p>${emptyMessage}</p></div>`;
         updateBulkActionsUI(filteredUsers);
         return;
     }
@@ -2051,10 +3622,18 @@ function renderUsersList() {
 
 function getVisibleConversationIds() {
     const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+    const isArchiveView = conversationsList && conversationsList.dataset.archiveView === 'true';
     return allUsers
         .filter(user => {
             const searchText = (user.userName || user.userEmail || user.userId || '').toLowerCase();
-            return searchText.includes(searchTerm);
+            const matchesSearch = searchText.includes(searchTerm);
+            
+            // Filter by archive status
+            if (isArchiveView) {
+                return matchesSearch && user.archived === true;
+            } else {
+                return matchesSearch && user.archived !== true;
+            }
         })
         .map(user => user.id);
 }
@@ -2065,7 +3644,9 @@ function updateBulkActionsUI(visibleUsers = null) {
     const selectedTotal = selectedConversationIds.size;
 
     if (selectedChatsCount) selectedChatsCount.textContent = selectedTotal;
+    if (archivedChatsCount) archivedChatsCount.textContent = selectedTotal;
     if (deleteSelectedChatsBtn) deleteSelectedChatsBtn.disabled = selectedTotal === 0;
+    if (archiveSelectedChatsBtn) archiveSelectedChatsBtn.disabled = selectedTotal === 0;
     if (selectAllConversations) {
         selectAllConversations.checked = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
         selectAllConversations.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visibleIds.length;
@@ -2091,8 +3672,7 @@ function updateNotificationSelectionUI(users = null) {
     const visibleIds = visibleUsers.map(user => getUserKey(user));
     const selectedVisible = visibleIds.filter(id => selectedNotificationUserIds.has(id)).length;
 
-    if (allUsersCount) allUsersCount.textContent = buildNotificationUsers().length;
-    if (notificationSelectedCount) notificationSelectedCount.textContent = selectedNotificationUserIds.size;
+    updateUsersPageStats();
     if (sendNotificationBtn) sendNotificationBtn.disabled = selectedNotificationUserIds.size === 0;
     if (deleteSelectedUsersBtn) deleteSelectedUsersBtn.disabled = selectedNotificationUserIds.size === 0;
     if (selectAllNotificationUsers) {
@@ -2195,6 +3775,30 @@ function renderSelectedUserDetails() {
     const tokens = getFcmTokens(user);
     const appVersion = getAppVersion(user);
     const lastActivityAt = getLastActivityAt(user);
+    const screenDimensions = getScreenDimensions(user);
+    const screenSize = getScreenSizeInInches(user);
+    const screenDPI = getScreenDPI(user);
+    const screenDP = getScreenDP(user);
+    const screenDensity = getScreenDensity(user);
+    const androidVersion = getAndroidVersion(user);
+    
+    // تصحيح: استخراج البيانات مباشرة من user object
+    const actualScreenResolution = user.screenResolution || user.screen_resolution || screenDimensions;
+    const actualScreenInches = user.screenInches || user.screen_inches || screenSize;
+    const actualScreenDPI = user.screenDPI || user.screen_dpi || screenDPI;
+    const actualScreenDP = user.screenDP || user.screen_dp || screenDP;
+    const actualScreenDensity = user.screenDensity || user.screen_density || screenDensity;
+    const actualAndroidVersion = user.androidVersion || user.android_version || androidVersion;
+    
+    console.log('📱 بيانات المستخدم:', {
+        screenResolution: actualScreenResolution,
+        screenInches: actualScreenInches,
+        screenDPI: actualScreenDPI,
+        screenDP: actualScreenDP,
+        screenDensity: actualScreenDensity,
+        androidVersion: actualAndroidVersion
+    });
+    
     const detailRows = [
         ['الاسم', getDisplayName(user)],
         ['البريد', getUserEmail(user)],
@@ -2202,7 +3806,13 @@ function renderSelectedUserDetails() {
         ['رقم آخر بلاغ', user.reportId],
         ['الجهاز', user.device],
         ['الصفحة الحالية', getUserLocationText(user)],
+        ['إصدار الأندرويد', actualAndroidVersion],
         ['إصدار التطبيق', appVersion],
+        ['ابعاد الشاشة (بكسل)', actualScreenResolution],
+        ['حجم الشاشة', actualScreenInches],
+        ['كثافة البكسل DPI', actualScreenDPI],
+        ['وحدات DP', actualScreenDP],
+        ['فئة الكثافة', actualScreenDensity],
         ['آخر استخدام', lastActivityAt ? `${formatInactiveSince(lastActivityAt)} - ${new Date(lastActivityAt).toLocaleString('ar-SA')}` : 'غير متوفر'],
         ['رموز FCM', tokens.length ? `${tokens.length} محفوظ` : 'غير متوفر'],
         ['متوسط يومي', formatUsage(usage.daily)],
@@ -2256,7 +3866,7 @@ async function editUserName(userKey) {
         const updates = [];
 
         if (appUser?.id) {
-            updates.push(updateDoc(doc(db, USERS_COLLECTION_NAME, appUser.id), {
+            updates.push(updateDoc(doc(db(), USERS_COLLECTION_NAME, appUser.id), {
                 userName: cleanName,
                 displayName: cleanName,
                 nameUpdatedAt: Date.now()
@@ -2264,7 +3874,7 @@ async function editUserName(userKey) {
         }
 
         reports.forEach(report => {
-            updates.push(updateDoc(doc(db, COLLECTION_NAME, report.id), {
+            updates.push(updateDoc(doc(db(), COLLECTION_NAME, report.id), {
                 userName: cleanName,
                 displayName: cleanName,
                 nameUpdatedAt: Date.now()
@@ -2330,13 +3940,13 @@ async function sendNotificationRequest() {
 
     try {
         if (sendNotificationBtn) sendNotificationBtn.disabled = true;
-        await addDoc(collection(db, NOTIFICATION_REQUESTS_COLLECTION), {
+        const docRef = await addDoc(collection(db(), NOTIFICATION_REQUESTS_COLLECTION), {
             title,
             body,
             link,
             status: 'pending',
             createdAt: Date.now(),
-            createdBy: auth?.currentUser?.email || '',
+            createdBy: auth().currentUser?.email || '',
             recipientCount: recipients.length,
             recipients: recipients.map(user => ({
                 userKey: getUserKey(user),
@@ -2347,7 +3957,12 @@ async function sendNotificationRequest() {
             }))
         });
 
-        showToast(`تم إنشاء طلب إشعار لـ ${recipients.length} مستخدم`);
+        selectedNotificationHistoryId = docRef.id;
+        notificationHistoryLoadError = null;
+        setUsersPanel('history');
+        await refreshNotificationHistoryOnce();
+
+        showToast(`تم حفظ الإشعار في السجل وإرساله لـ ${recipients.length} مستخدم`);
         if (notificationTitleInput) notificationTitleInput.value = '';
         if (notificationBodyInput) notificationBodyInput.value = '';
         if (notificationLinkInput) {
@@ -2359,7 +3974,12 @@ async function sendNotificationRequest() {
         }
     } catch (error) {
         console.error('خطأ في إنشاء طلب الإشعار:', error);
-        showToast('فشل إنشاء طلب الإشعار', true);
+        const code = String(error?.code || '').toLowerCase();
+        if (code.includes('permission-denied')) {
+            showToast('فشل حفظ الإشعار — أضف صلاحية notificationRequests في Firestore Rules', true);
+        } else {
+            showToast(`فشل إنشاء طلب الإشعار: ${error?.message || 'خطأ غير معروف'}`, true);
+        }
     } finally {
         updateNotificationSelectionUI();
     }
@@ -2374,9 +3994,18 @@ function openMobileSidebar() {
 
 function closeMobileSidebar() {
     const sidebar = document.querySelector('.sidebar-new');
-    if (sidebar) sidebar.classList.remove('open');
+    if (sidebar) {
+        console.log('Closing sidebar - removing open class');
+        // إزالة الـ open class لإغلاق القائمة الجانبية
+        sidebar.classList.remove('open');
+        // Force a reflow to ensure the transform is applied
+        void sidebar.offsetHeight;
+    }
     const overlay = document.getElementById('sidebarOverlay');
-    if (overlay) overlay.style.display = 'none';
+    if (overlay) {
+        console.log('Hiding overlay');
+        overlay.style.display = 'none';
+    }
 }
 
 function updateUserPresenceUI(user) {
@@ -2548,7 +4177,7 @@ async function markMessagesAsRead(userId, messages) {
     );
     
     try {
-        const userRef = doc(db, COLLECTION_NAME, userId);
+        const userRef = doc(db(), COLLECTION_NAME, userId);
         await updateDoc(userRef, {
             messages: updatedMessages,
             reportRead: true,
@@ -2606,6 +4235,12 @@ function renderMessages(messages) {
                             ${user.page ? `<div class="detail-item-new"><span class="detail-label-new">الصفحة</span><span class="detail-value-new">${escapeHtml(user.page)}</span></div>` : ''}
                             ${user.part ? `<div class="detail-item-new"><span class="detail-label-new">القسم</span><span class="detail-value-new">${escapeHtml(user.part)}</span></div>` : ''}
                             ${user.appVersion ? `<div class="detail-item-new"><span class="detail-label-new">إصدار التطبيق</span><span class="detail-value-new">${escapeHtml(user.appVersion)}</span></div>` : ''}
+                            ${getAndroidVersion(user) ? `<div class="detail-item-new"><span class="detail-label-new">إصدار الأندرويد</span><span class="detail-value-new">${escapeHtml(getAndroidVersion(user))}</span></div>` : ''}
+                            ${getScreenDimensions(user) ? `<div class="detail-item-new"><span class="detail-label-new">ابعاد الشاشة (بكسل)</span><span class="detail-value-new">${escapeHtml(getScreenDimensions(user))}</span></div>` : ''}
+                            ${getScreenSizeInInches(user) ? `<div class="detail-item-new"><span class="detail-label-new">حجم الشاشة</span><span class="detail-value-new">${escapeHtml(getScreenSizeInInches(user))}</span></div>` : ''}
+                            ${getScreenDPI(user) ? `<div class="detail-item-new"><span class="detail-label-new">كثافة البكسل DPI</span><span class="detail-value-new">${escapeHtml(getScreenDPI(user))}</span></div>` : ''}
+                            ${getScreenDP(user) ? `<div class="detail-item-new"><span class="detail-label-new">وحدات DP</span><span class="detail-value-new">${escapeHtml(getScreenDP(user))}</span></div>` : ''}
+                            ${getScreenDensity(user) ? `<div class="detail-item-new"><span class="detail-label-new">فئة الكثافة</span><span class="detail-value-new">${escapeHtml(getScreenDensity(user))}</span></div>` : ''}
                             ${user.status ? `<div class="detail-item-new"><span class="detail-label-new">الحالة</span><span class="detail-value-new">${escapeHtml(user.status)}</span></div>` : ''}
                             ${user.timestamp ? `<div class="detail-item-new"><span class="detail-label-new">تاريخ التقرير</span><span class="detail-value-new">${new Date(user.timestamp).toLocaleString('ar-SA')}</span></div>` : ''}
                         </div>
@@ -2741,7 +4376,7 @@ function deleteMessage(msgId) {
 
 async function updateMessagesInFirebase() {
     try {
-        const userRef = doc(db, COLLECTION_NAME, selectedUserId);
+        const userRef = doc(db(), COLLECTION_NAME, selectedUserId);
         await updateDoc(userRef, { messages: currentMessages });
         
         renderMessages(currentMessages);
@@ -2789,7 +4424,7 @@ async function sendReply() {
         };
         
         const updatedMessages = [...(user.messages || []), newMessage];
-        const userRef = doc(db, COLLECTION_NAME, selectedUserId);
+        const userRef = doc(db(), COLLECTION_NAME, selectedUserId);
         await updateDoc(userRef, { messages: updatedMessages });
         notifyUser(user.reportId || selectedUserId, notificationText);
         
@@ -2949,7 +4584,7 @@ async function deleteChatAttachments(user) {
 async function deleteChatById(userId) {
     const user = allUsers.find(item => item.id === userId);
     if (user) await deleteChatAttachments(user);
-    await deleteDoc(doc(db, COLLECTION_NAME, userId));
+    await deleteDoc(doc(db(), COLLECTION_NAME, userId));
 }
 
 function clearCurrentChatView() {
@@ -2989,7 +4624,7 @@ async function deleteCurrentChat() {
 
         if (usersCountSpan) usersCountSpan.textContent = allUsers.length;
         if (totalTicketsSpan) totalTicketsSpan.textContent = allUsers.filter(u => u.status !== 'Solved').length;
-        if (conversationsCountSpan) conversationsCountSpan.textContent = allUsers.length;
+        if (conversationsCountSpan) conversationsCountSpan.textContent = allUsers.filter(u => !u.archived).length;
 
         showToast('تم حذف الدردشة بالكامل');
     } catch (error) {
@@ -3019,7 +4654,7 @@ async function deleteSelectedChats() {
 
         if (usersCountSpan) usersCountSpan.textContent = allUsers.length;
         if (totalTicketsSpan) totalTicketsSpan.textContent = allUsers.filter(u => u.status !== 'Solved').length;
-        if (conversationsCountSpan) conversationsCountSpan.textContent = allUsers.length;
+        if (conversationsCountSpan) conversationsCountSpan.textContent = allUsers.filter(u => !u.archived).length;
 
         showToast(`تم حذف ${ids.length} محادثة`);
     } catch (error) {
@@ -3027,6 +4662,71 @@ async function deleteSelectedChats() {
         showToast('فشل حذف بعض المحادثات المحددة', true);
     } finally {
         updateBulkActionsUI();
+    }
+}
+
+async function archiveSelectedChats() {
+    const ids = [...selectedConversationIds].filter(id => allUsers.some(user => user.id === id));
+    if (ids.length === 0) return;
+
+    if (!confirm(`هل تريد حفظ ${ids.length} محادثة محددة في الأرشيف؟`)) return;
+
+    if (archiveSelectedChatsBtn) archiveSelectedChatsBtn.disabled = true;
+
+    try {
+        await Promise.all(ids.map(id => {
+            const userRef = doc(db(), COLLECTION_NAME, id);
+            return updateDoc(userRef, { archived: true });
+        }));
+
+        allUsers = allUsers.map(user => 
+            ids.includes(user.id) ? { ...user, archived: true } : user
+        );
+
+        selectedConversationIds.clear();
+        renderUsersList();
+
+        if (conversationsCountSpan) conversationsCountSpan.textContent = allUsers.filter(u => !u.archived).length;
+
+        showToast(`تم حفظ ${ids.length} محادثة في الأرشيف`);
+    } catch (error) {
+        console.error('خطأ في حفظ المحادثات في الأرشيف:', error);
+        showToast('فشل حفظ بعض المحادثات في الأرشيف', true);
+    } finally {
+        updateBulkActionsUI();
+    }
+}
+
+async function deleteSelectedGuests() {
+    const ids = [...selectedGuestUserIds];
+    if (ids.length === 0) return;
+
+    const message = `هل تريد حذف ${ids.length} ضيف محدد من Firebase؟ سيتم حذف مستنداتهم من guestUsers.`;
+    if (!confirm(message)) return;
+
+    if (deleteSelectedGuestsBtn) deleteSelectedGuestsBtn.disabled = true;
+
+    try {
+        for (const guestKey of ids) {
+            const guest = buildGuestUsersList().find(user => getGuestKey(user) === guestKey);
+            const docId = String(guest?.id || guest?.anonymousUid || guestKey).trim();
+            if (docId) {
+                await deleteDoc(doc(db(), GUEST_USERS_COLLECTION_NAME, docId));
+            }
+        }
+
+        guestUsers = guestUsers.filter(user => !ids.includes(getGuestKey(user)));
+        if (selectedGuestUserId && ids.includes(selectedGuestUserId)) {
+            selectedGuestUserId = null;
+        }
+        selectedGuestUserIds.clear();
+        renderGuestUsers();
+        showToast(`تم حذف ${ids.length} ضيف`);
+    } catch (error) {
+        console.error('خطأ في حذف الضيوف:', error);
+        showToast('فشل حذف بعض الضيوف — تأكد من صلاحيات الحذف في Firestore Rules', true);
+    } finally {
+        updateGuestSelectionUI();
     }
 }
 
@@ -3049,12 +4749,12 @@ async function deleteSelectedUsers() {
 
             const appUser = appUsers.find(user => getUserKey(user) === userKey);
             if (appUser?.id) {
-                await deleteDoc(doc(db, USERS_COLLECTION_NAME, appUser.id));
+                await deleteDoc(doc(db(), USERS_COLLECTION_NAME, appUser.id));
             }
 
             const uid = getAuthUid({ ...mergedUser, ...appUser });
             if (uid) {
-                await addDoc(collection(db, USER_DELETION_REQUESTS_COLLECTION), {
+                await addDoc(collection(db(), USER_DELETION_REQUESTS_COLLECTION), {
                     uid,
                     userKey,
                     email: getUserEmail({ ...mergedUser, ...appUser }),
@@ -3093,7 +4793,7 @@ async function toggleUserReply() {
     user.canUserReply = user.canUserReply === undefined ? true : !user.canUserReply;
     
     try {
-        const userRef = doc(db, COLLECTION_NAME, selectedUserId);
+        const userRef = doc(db(), COLLECTION_NAME, selectedUserId);
         await updateDoc(userRef, { canUserReply: user.canUserReply });
         
         updateUserReplyButtonUI(user);
@@ -3144,7 +4844,7 @@ async function updateReportStatus() {
     const newStatus = statusDropdown.value;
     
     try {
-        const userRef = doc(db, COLLECTION_NAME, selectedUserId);
+        const userRef = doc(db(), COLLECTION_NAME, selectedUserId);
         await updateDoc(userRef, { status: newStatus });
         
         user.status = newStatus;
@@ -3175,6 +4875,18 @@ function showUserInfo() {
         return;
     }
     
+    // طباعة البيانات للتحقق
+    console.log('👤 بيانات المستخدم المختار:', {
+        userId: user.userId,
+        userName: user.userName,
+        androidVersion: user.androidVersion,
+        screenResolution: user.screenResolution,
+        screenInches: user.screenInches,
+        screenDPI: user.screenDPI,
+        screenDP: user.screenDP,
+        screenDensity: user.screenDensity
+    });
+    
     const infoRows = [
         { label: 'اسم المستخدم', value: user.userName },
         { label: 'البريد الإلكتروني', value: user.userEmail },
@@ -3185,8 +4897,16 @@ function showUserInfo() {
         { label: 'الصفحة', value: user.page },
         { label: 'القسم', value: user.part },
         { label: 'إصدار التطبيق', value: user.appVersion },
+        { label: 'إصدار الأندرويد', value: user.androidVersion },
+        { label: 'ابعاد الشاشة (بكسل)', value: user.screenResolution },
+        { label: 'حجم الشاشة', value: user.screenInches },
+        { label: 'كثافة البكسل DPI', value: user.screenDPI },
+        { label: 'وحدات DP', value: user.screenDP },
+        { label: 'فئة الكثافة', value: user.screenDensity },
         { label: 'تاريخ التقرير', value: user.timestamp ? new Date(user.timestamp).toLocaleString('ar-SA') : '' }
     ];
+    
+    console.log('📊 جميع الصفوف قبل الفلترة:', infoRows);
     
     let html = infoRows
         .filter(row => row.value)
@@ -3197,6 +4917,8 @@ function showUserInfo() {
             </div>
         `).join('');
     
+    console.log('✅ الصفوف بعد الفلترة (المعروضة):', infoRows.filter(row => row.value));
+    
     if (user.message) {
         html += `
             <div class="info-row-new" style="border-top: 1px solid var(--gray-200); margin-top: 12px; padding-top: 12px;">
@@ -3206,12 +4928,434 @@ function showUserInfo() {
         `;
     }
     
-    infoContent.innerHTML = html;
+    if (infoContent) infoContent.innerHTML = html;
     if (infoPanel) infoPanel.style.display = 'block';
 }
 
+// ========== نظام الاختصارات السريعة للدردشة ==========
+const SHORTCUTS_STORAGE_KEY = 'chat_shortcuts';
+let shortcuts = [];
+let editingShortcutIndex = null;
+let shortcutSuggestionsActive = false;
+let shortcutSuggestionsMatches = [];
+let shortcutSuggestionsSelectedIndex = 0;
+let shortcutActiveToken = '';
+let shortcutTokenRange = { start: 0, end: 0 };
+
+// عناصر DOM للمختصرات - سيتم تهيئتها بعد تحميل DOM (تم تعريفها في الجزء العلوي)
+
+// ========== دوال المختصرات ==========
+
+// تحميل المختصرات من التخزين
+function loadShortcuts() {
+    try {
+        const stored = localStorage.getItem(SHORTCUTS_STORAGE_KEY);
+        shortcuts = stored ? JSON.parse(stored) : [];
+        console.log('✅ تم تحميل المختصرات:', shortcuts);
+    } catch (error) {
+        console.error('❌ خطأ في تحميل المختصرات:', error);
+        shortcuts = [];
+    }
+}
+
+// حفظ المختصرات في التخزين
+function saveShortcuts() {
+    try {
+        localStorage.setItem(SHORTCUTS_STORAGE_KEY, JSON.stringify(shortcuts));
+        console.log('✅ تم حفظ المختصرات');
+    } catch (error) {
+        console.error('❌ خطأ في حفظ المختصرات:', error);
+        showToast('❌ خطأ في حفظ المختصرات', true);
+    }
+}
+
+// عرض المختصرات في الـ Modal
+function displayShortcuts() {
+    if (!shortcutsList) return;
+    
+    if (shortcuts.length === 0) {
+        shortcutsList.innerHTML = `
+            <div class="empty-shortcuts-state">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3">
+                    <rect x="3" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="14" width="7" height="7"></rect>
+                    <rect x="3" y="14" width="7" height="7"></rect>
+                </svg>
+                <p>لا توجد اختصارات حتى الآن</p>
+            </div>
+        `;
+        return;
+    }
+    
+    shortcutsList.innerHTML = shortcuts.map((shortcut, index) => `
+        <div class="shortcut-item">
+            <div class="shortcut-info">
+                <div class="shortcut-name">
+                    <span class="shortcut-name-badge">${escapeHtml(shortcut.name)}</span>
+                </div>
+                <div class="shortcut-preview">${escapeHtml(shortcut.text)}</div>
+            </div>
+            <div class="shortcut-actions">
+                <button class="shortcut-edit-btn" onclick="editShortcut(${index})" title="تعديل المختصر">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                    </svg>
+                </button>
+                <button class="shortcut-delete-btn" onclick="deleteShortcut(${index})" title="حذف المختصر">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    `).join('');
+}
+
+// حذف مختصر
+function deleteShortcut(index) {
+    if (confirm('هل تريد حذف هذا المختصر؟')) {
+        shortcuts.splice(index, 1);
+        saveShortcuts();
+        displayShortcuts();
+        showToast('✅ تم حذف المختصر');
+    }
+}
+
+function openShortcutForm(index = null) {
+    editingShortcutIndex = index;
+    const titleEl = document.getElementById('addShortcutModalTitle');
+    const errorDiv = document.getElementById('addShortcutError');
+
+    if (index !== null && shortcuts[index]) {
+        if (shortcutName) shortcutName.value = shortcuts[index].name;
+        if (shortcutText) shortcutText.value = shortcuts[index].text;
+        if (titleEl) titleEl.textContent = 'تعديل الاختصار';
+        if (saveShortcutBtn) saveShortcutBtn.textContent = 'حفظ التعديلات';
+    } else {
+        if (shortcutName) shortcutName.value = '';
+        if (shortcutText) shortcutText.value = '';
+        if (titleEl) titleEl.textContent = 'إضافة اختصار جديد';
+        if (saveShortcutBtn) saveShortcutBtn.textContent = 'حفظ المختصر';
+    }
+
+    if (errorDiv) errorDiv.style.display = 'none';
+    if (shortcutFormCard) {
+        shortcutFormCard.style.display = 'block';
+        shortcutFormCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    if (shortcutName) shortcutName.focus();
+}
+
+function editShortcut(index) {
+    setSettingsPanel('shortcuts');
+    openShortcutForm(index);
+}
+
+function saveShortcut() {
+    const name = shortcutName.value.trim();
+    const text = shortcutText.value.trim();
+    const errorDiv = document.getElementById('addShortcutError');
+
+    if (!name) {
+        if (errorDiv) {
+            errorDiv.textContent = '❌ يرجى إدخال اسم المختصر';
+            errorDiv.style.display = 'block';
+        }
+        return;
+    }
+
+    if (!text) {
+        if (errorDiv) {
+            errorDiv.textContent = '❌ يرجى إدخال النص الكامل';
+            errorDiv.style.display = 'block';
+        }
+        return;
+    }
+
+    const isDuplicate = shortcuts.some((s, i) => s.name === name && i !== editingShortcutIndex);
+    if (isDuplicate) {
+        if (errorDiv) {
+            errorDiv.textContent = '❌ هذا الاختصار موجود بالفعل';
+            errorDiv.style.display = 'block';
+        }
+        return;
+    }
+
+    if (editingShortcutIndex !== null) {
+        shortcuts[editingShortcutIndex] = { name, text };
+    } else {
+        shortcuts.push({ name, text });
+    }
+
+    saveShortcuts();
+    editingShortcutIndex = null;
+    if (shortcutName) shortcutName.value = '';
+    if (shortcutText) shortcutText.value = '';
+    if (errorDiv) errorDiv.style.display = 'none';
+    closeShortcutForm();
+    displayShortcuts();
+}
+
+function isShortcutTokenDelimiter(char) {
+    if (!char) return true;
+    return /[\s\n\r\t.,;:!?()[\]{}«»،؛/\\|]/.test(char);
+}
+
+function getCurrentShortcutToken(input) {
+    if (!input) return { token: '', start: 0, end: 0 };
+
+    const value = input.value;
+    const pos = typeof input.selectionStart === 'number' ? input.selectionStart : value.length;
+
+    let start = pos;
+    while (start > 0 && !isShortcutTokenDelimiter(value[start - 1])) {
+        start--;
+    }
+
+    return {
+        token: value.substring(start, pos),
+        start,
+        end: pos
+    };
+}
+
+function getShortcutMatches(query) {
+    const q = query.trim();
+    if (!q || shortcuts.length === 0) return [];
+
+    const exactMatches = shortcuts.filter(s => s.name === q);
+    if (exactMatches.length > 0) return exactMatches;
+
+    const startsWithMatches = shortcuts.filter(s => s.name.startsWith(q));
+    if (startsWithMatches.length > 0) return startsWithMatches;
+
+    return shortcuts.filter(s => s.name.includes(q));
+}
+
+function renderShortcutsSuggestions(matches, query) {
+    const suggestionsDiv = document.getElementById('shortcutsSuggestions') || createSuggestionsDiv();
+    const isExact = matches.some(s => s.name === query.trim());
+    const headerText = isExact
+        ? (matches.length === 1 ? 'هل تريد استخدام هذا المختصر؟' : 'هل تريد استخدام أحد هذه المختصرات؟')
+        : 'اختر اختصاراً من القائمة:';
+
+    suggestionsDiv.innerHTML = `
+        <div class="suggestions-header">
+            <span>${headerText}</span>
+            <span class="suggestions-hint">Enter · ↑↓</span>
+        </div>
+        ${matches.map((shortcut, index) => `
+            <div class="suggestion-item ${index === shortcutSuggestionsSelectedIndex ? 'selected' : ''}"
+                 data-index="${index}"
+                 onmousedown="event.preventDefault(); selectAndApplyShortcut(${index})">
+                <strong>⚡ ${escapeHtml(shortcut.name)}</strong>
+                <div class="suggestion-preview">${escapeHtml(shortcut.text.substring(0, 100))}${shortcut.text.length > 100 ? '...' : ''}</div>
+            </div>
+        `).join('')}
+    `;
+    suggestionsDiv.style.display = 'block';
+}
+
+function handleMessageInputShortcuts() {
+    if (!messageInput) return;
+
+    const { token, start, end } = getCurrentShortcutToken(messageInput);
+    shortcutTokenRange = { start, end };
+    shortcutActiveToken = token;
+    const matches = getShortcutMatches(token);
+
+    if (matches.length === 0) {
+        hideShortcutsSuggestions();
+        shortcutSuggestionsActive = false;
+        shortcutSuggestionsMatches = [];
+        shortcutSuggestionsSelectedIndex = 0;
+        shortcutActiveToken = '';
+        return;
+    }
+
+    shortcutSuggestionsActive = true;
+    shortcutSuggestionsMatches = matches;
+    if (shortcutSuggestionsSelectedIndex >= matches.length) {
+        shortcutSuggestionsSelectedIndex = 0;
+    }
+    renderShortcutsSuggestions(matches, token);
+}
+
+function applySelectedShortcut() {
+    const shortcut = shortcutSuggestionsMatches[shortcutSuggestionsSelectedIndex];
+    if (!shortcut || !messageInput) return;
+
+    const value = messageInput.value;
+    const { start, end } = shortcutTokenRange;
+    const before = value.substring(0, start);
+    const after = value.substring(end);
+    messageInput.value = before + shortcut.text + after;
+
+    const cursorPos = before.length + shortcut.text.length;
+    messageInput.setSelectionRange(cursorPos, cursorPos);
+    messageInput.style.height = 'auto';
+    messageInput.style.height = messageInput.scrollHeight + 'px';
+    hideShortcutsSuggestions();
+    shortcutSuggestionsActive = false;
+    shortcutSuggestionsMatches = [];
+    shortcutSuggestionsSelectedIndex = 0;
+    shortcutActiveToken = '';
+    updateSendButtonState();
+    messageInput.focus();
+}
+
+function selectAndApplyShortcut(index) {
+    shortcutSuggestionsSelectedIndex = index;
+    applySelectedShortcut();
+}
+
+function handleShortcutSuggestionKeydown(e) {
+    if (!shortcutSuggestionsActive || shortcutSuggestionsMatches.length === 0) return false;
+
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        shortcutSuggestionsSelectedIndex = (shortcutSuggestionsSelectedIndex + 1) % shortcutSuggestionsMatches.length;
+        renderShortcutsSuggestions(shortcutSuggestionsMatches, shortcutActiveToken);
+        return true;
+    }
+
+    if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        shortcutSuggestionsSelectedIndex = (shortcutSuggestionsSelectedIndex - 1 + shortcutSuggestionsMatches.length) % shortcutSuggestionsMatches.length;
+        renderShortcutsSuggestions(shortcutSuggestionsMatches, shortcutActiveToken);
+        return true;
+    }
+
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        applySelectedShortcut();
+        return true;
+    }
+
+    if (e.key === 'Escape') {
+        e.preventDefault();
+        hideShortcutsSuggestions();
+        shortcutSuggestionsActive = false;
+        shortcutSuggestionsMatches = [];
+        shortcutSuggestionsSelectedIndex = 0;
+        return true;
+    }
+
+    return false;
+}
+
+function createSuggestionsDiv() {
+    const div = document.createElement('div');
+    div.id = 'shortcutsSuggestions';
+    div.className = 'shortcuts-suggestions';
+    const replyWrapper = document.querySelector('.reply-wrapper');
+    if (replyWrapper) {
+        replyWrapper.style.position = 'relative';
+        replyWrapper.appendChild(div);
+    }
+    return div;
+}
+
+function hideShortcutsSuggestions() {
+    const suggestionsDiv = document.getElementById('shortcutsSuggestions');
+    if (suggestionsDiv) {
+        suggestionsDiv.style.display = 'none';
+        suggestionsDiv.innerHTML = '';
+    }
+}
+
+function closeShortcutForm() {
+    editingShortcutIndex = null;
+    const errorDiv = document.getElementById('addShortcutError');
+    if (shortcutFormCard) shortcutFormCard.style.display = 'none';
+    if (shortcutName) shortcutName.value = '';
+    if (shortcutText) shortcutText.value = '';
+    if (errorDiv) errorDiv.style.display = 'none';
+}
+
+function initSettingsEventListeners() {
+    if (settingsToggleBtn) {
+        settingsToggleBtn.addEventListener('click', () => openSettings('hub'));
+    }
+
+    if (settingsBackBtn) {
+        settingsBackBtn.addEventListener('click', () => setActiveView('chat'));
+    }
+
+    if (settingsMenuToggleBtn) {
+        settingsMenuToggleBtn.addEventListener('click', () => openMobileSidebar());
+    }
+
+    document.querySelectorAll('.settings-nav-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const panel = item.dataset.panel;
+            if (panel) setSettingsPanel(panel);
+        });
+    });
+
+    document.querySelectorAll('.settings-hub-card').forEach(card => {
+        card.addEventListener('click', () => {
+            const panel = card.dataset.goto;
+            if (panel) setSettingsPanel(panel);
+        });
+    });
+
+    if (copyEmailBtn) {
+        copyEmailBtn.addEventListener('click', () => {
+            const user = auth().currentUser;
+            if (user?.email) {
+                navigator.clipboard.writeText(user.email).then(() => {
+                    showToast('✅ تم نسخ البريد الإلكتروني');
+                }).catch(() => {
+                    showToast('⚠️ البريد: ' + user.email, false);
+                });
+            }
+        });
+    }
+
+    if (resetPasswordFormBtn) {
+        resetPasswordFormBtn.addEventListener('click', resetPasswordForm);
+    }
+}
+
+// ========== Event Listeners - إضافة Listeners للمختصرات ==========
+function addShortcutEventListeners() {
+    if (openAddShortcutFromViewBtn) {
+        openAddShortcutFromViewBtn.addEventListener('click', () => openShortcutForm());
+    }
+
+    if (saveShortcutBtn) {
+        saveShortcutBtn.addEventListener('click', saveShortcut);
+    }
+
+    if (cancelShortcutFormBtn) {
+        cancelShortcutFormBtn.addEventListener('click', closeShortcutForm);
+    }
+
+    if (shortcutName) {
+        shortcutName.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                if (shortcutText) shortcutText.focus();
+            }
+        });
+    }
+
+    if (shortcutText) {
+        shortcutText.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && e.ctrlKey) {
+                e.preventDefault();
+                saveShortcut();
+            }
+        });
+    }
+}
+
 function listenToUserUpdates() {
-    const q = query(collection(db, COLLECTION_NAME));
+    const q = query(collection(db(), COLLECTION_NAME));
     
     onSnapshot(q, async (snapshot) => {
         if (selectedUserId) {
@@ -3268,10 +5412,13 @@ function listenToUserUpdates() {
         
         if (usersCountSpan) usersCountSpan.textContent = allUsers.length;
         if (totalTicketsSpan) totalTicketsSpan.textContent = allUsers.filter(u => u.status !== 'Solved').length;
-        if (conversationsCountSpan) conversationsCountSpan.textContent = allUsers.length;
+        if (conversationsCountSpan) conversationsCountSpan.textContent = allUsers.filter(u => !u.archived).length;
         
         renderUsersList();
-        if (activeView === 'users') renderNotificationUsers();
+        if (activeView === 'users') {
+            if (activeUsersPanel === 'guests') renderGuestUsers();
+            else if (activeUsersPanel !== 'history') renderNotificationUsers();
+        }
     });
 }
 
@@ -3300,13 +5447,33 @@ function initEventListeners() {
     if (messageInput) {
         messageInput.addEventListener('input', () => {
             updateSendButtonState();
+            handleMessageInputShortcuts();
         });
-        
+
+        messageInput.addEventListener('click', () => {
+            handleMessageInputShortcuts();
+        });
+
+        messageInput.addEventListener('keyup', (e) => {
+            if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+                handleMessageInputShortcuts();
+            }
+        });
+
         messageInput.addEventListener('keydown', (e) => {
+            if (handleShortcutSuggestionKeydown(e)) return;
+
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 if (sendBtn && !sendBtn.disabled) handleSendOrSave();
             }
+        });
+
+        messageInput.addEventListener('blur', () => {
+            setTimeout(() => {
+                hideShortcutsSuggestions();
+                shortcutSuggestionsActive = false;
+            }, 180);
         });
     }
     
@@ -3323,9 +5490,18 @@ function initEventListeners() {
     document.addEventListener('pointercancel', handleStatusTooltipPointerEnd);
     document.addEventListener('scroll', hideStatusTooltip, true);
     document.addEventListener('contextmenu', handleStatusTooltipContextMenu);
-    if (chatViewBtn) chatViewBtn.addEventListener('click', () => setActiveView('chat'));
-    if (usersViewBtn) usersViewBtn.addEventListener('click', () => setActiveView('users'));
-    if (dashboardViewBtn) dashboardViewBtn.addEventListener('click', () => setActiveView('dashboard'));
+    if (chatViewBtn) chatViewBtn.addEventListener('click', () => {
+        closeMobileSidebar();
+        setActiveView('chat');
+    });
+    if (usersViewBtn) usersViewBtn.addEventListener('click', () => {
+        closeMobileSidebar();
+        setActiveView('users');
+    });
+    if (dashboardViewBtn) dashboardViewBtn.addEventListener('click', () => {
+        closeMobileSidebar();
+        setActiveView('dashboard');
+    });
     if (usersSearchInput) usersSearchInput.addEventListener('input', renderNotificationUsers);
     if (usersPresenceFilter) usersPresenceFilter.addEventListener('change', renderNotificationUsers);
     if (usersAppVersionFilter) usersAppVersionFilter.addEventListener('change', renderNotificationUsers);
@@ -3335,8 +5511,23 @@ function initEventListeners() {
     if (usersAdvancedFiltersBtn) usersAdvancedFiltersBtn.addEventListener('click', toggleAdvancedFilters);
     if (usersClearFiltersBtn) usersClearFiltersBtn.addEventListener('click', resetNotificationFilters);
     if (usersSelectionTabBtn) usersSelectionTabBtn.addEventListener('click', () => setUsersPanel('selection'));
+    if (guestUsersTabBtn) guestUsersTabBtn.addEventListener('click', () => setUsersPanel('guests'));
     if (notificationsHistoryTabBtn) notificationsHistoryTabBtn.addEventListener('click', () => setUsersPanel('history'));
+    if (guestsSearchInput) guestsSearchInput.addEventListener('input', renderGuestUsers);
+    if (guestsPresenceFilter) guestsPresenceFilter.addEventListener('change', renderGuestUsers);
+    if (guestsAppVersionFilter) guestsAppVersionFilter.addEventListener('change', renderGuestUsers);
+    if (guestsInactivityFilter) guestsInactivityFilter.addEventListener('change', renderGuestUsers);
+    if (guestsCustomInactivityValue) guestsCustomInactivityValue.addEventListener('input', renderGuestUsers);
+    if (guestsCustomInactivityUnit) guestsCustomInactivityUnit.addEventListener('change', renderGuestUsers);
+    if (guestsAdvancedFiltersBtn) guestsAdvancedFiltersBtn.addEventListener('click', toggleGuestAdvancedFilters);
+    if (guestsClearFiltersBtn) guestsClearFiltersBtn.addEventListener('click', resetGuestFilters);
+    if (selectAllGuestUsers) selectAllGuestUsers.addEventListener('change', toggleSelectAllGuestUsers);
+    if (deleteSelectedGuestsBtn) deleteSelectedGuestsBtn.addEventListener('click', deleteSelectedGuests);
     if (notificationsHistorySearchInput) notificationsHistorySearchInput.addEventListener('input', renderNotificationHistory);
+    disableBrowserAutofill(notificationsHistorySearchInput);
+    disableBrowserAutofill(notificationTitleInput);
+    disableBrowserAutofill(notificationBodyInput);
+    disableBrowserAutofill(notificationCustomLinkInput);
     if (selectAllNotificationHistory) selectAllNotificationHistory.addEventListener('change', toggleSelectAllNotificationHistory);
     if (deleteSelectedNotificationsBtn) deleteSelectedNotificationsBtn.addEventListener('click', deleteSelectedNotifications);
     if (selectAllNotificationUsers) selectAllNotificationUsers.addEventListener('change', toggleSelectAllNotificationUsers);
@@ -3361,6 +5552,14 @@ function initEventListeners() {
     if (deleteChatBtn) deleteChatBtn.addEventListener('click', deleteCurrentChat);
     if (selectAllConversations) selectAllConversations.addEventListener('change', toggleSelectAllConversations);
     if (deleteSelectedChatsBtn) deleteSelectedChatsBtn.addEventListener('click', deleteSelectedChats);
+    if (archiveSelectedChatsBtn) archiveSelectedChatsBtn.addEventListener('click', archiveSelectedChats);
+    if (archiveViewBtn) archiveViewBtn.addEventListener('click', () => {
+        // Toggle view between all conversations and archived conversations
+        const isArchiveView = conversationsList.dataset.archiveView === 'true';
+        conversationsList.dataset.archiveView = isArchiveView ? 'false' : 'true';
+        archiveViewBtn.classList.toggle('active', !isArchiveView);
+        renderUsersList();
+    });
     if (mediaViewerCloseBtn) mediaViewerCloseBtn.addEventListener('click', closeMediaViewer);
     if (mediaViewerBackdrop) mediaViewerBackdrop.addEventListener('click', closeMediaViewer);
     if (closeInfoBtn) closeInfoBtn.addEventListener('click', () => {
@@ -3398,6 +5597,31 @@ function initEventListeners() {
             openMobileSidebar();
         });
     }
+
+    const dashboardMenuToggleBtn = document.getElementById('dashboardMenuToggleBtn');
+    if (dashboardMenuToggleBtn) {
+        dashboardMenuToggleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const sidebar = document.querySelector('.sidebar-new');
+            if (sidebar) sidebar.classList.remove('collapsed');
+            document.body.classList.remove('sidebar-collapsed');
+            openMobileSidebar();
+        });
+    }
+
+    // استقبال رسائل من iframe الـ dashboard للتحكم بالقائمة الجانبية
+    window.addEventListener('message', (e) => {
+        console.log('Message received in main window:', e.data);
+        if (e.data && e.data.type === 'TOGGLE_SIDEBAR') {
+            console.log('Opening sidebar from dashboard');
+            const sidebar = document.querySelector('.sidebar-new');
+            if (sidebar) {
+                sidebar.classList.remove('collapsed');
+            }
+            document.body.classList.remove('sidebar-collapsed');
+            openMobileSidebar();
+        }
+    });
 
     const headerMenuToggleBtn = document.getElementById('headerMenuToggleBtn');
     if (headerMenuToggleBtn) {
@@ -3505,6 +5729,69 @@ function initEventListeners() {
     
     if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
     if (sidebarLogoutBtn) sidebarLogoutBtn.addEventListener('click', handleLogout);
+    initSettingsEventListeners();
+
+    if (savePasswordBtn) {
+        savePasswordBtn.addEventListener('click', async () => {
+            if (!currentPassword || !newPassword || !confirmNewPassword || !passwordChangeError) return;
+            
+            const currentPass = currentPassword.value.trim();
+            const newPass = newPassword.value.trim();
+            const confirmPass = confirmNewPassword.value.trim();
+            
+            // إعادة تعيين الخطأ
+            passwordChangeError.style.display = 'none';
+            
+            // التحقق من صحة البيانات
+            if (!currentPass || !newPass || !confirmPass) {
+                passwordChangeError.textContent = '❌ يرجى ملء جميع الحقول';
+                passwordChangeError.style.display = 'block';
+                return;
+            }
+            
+            if (newPass !== confirmPass) {
+                passwordChangeError.textContent = '❌ كلمتا المرور الجديدة غير متطابقتين';
+                passwordChangeError.style.display = 'block';
+                return;
+            }
+            
+            if (newPass.length < 6) {
+                passwordChangeError.textContent = '❌ يجب أن تكون كلمة المرور الجديدة 6 أحرف على الأقل';
+                passwordChangeError.style.display = 'block';
+                return;
+            }
+            
+            try {
+                const user = auth().currentUser;
+                if (!user || !user.email) {
+                    throw new Error('لم يتم تسجيل الدخول');
+                }
+                
+                // إعادة المصادقة أولاً
+                const credential = window.EmailAuthProvider.credential(user.email, currentPass);
+                await window.reauthenticateWithCredential(user, credential);
+                
+                // تغيير كلمة المرور
+                await window.updatePassword(user, newPass);
+                
+                showToast('✅ تم تغيير كلمة المرور بنجاح');
+                resetPasswordForm();
+                
+            } catch (error) {
+                console.error('خطأ في تغيير كلمة المرور:', error);
+                let errorMsg = '❌ حدث خطأ أثناء تغيير كلمة المرور';
+                if (error.code === 'auth/wrong-password') {
+                    errorMsg = '❌ كلمة المرور الحالية غير صحيحة';
+                } else if (error.code === 'auth/weak-password') {
+                    errorMsg = '❌ كلمة المرور الجديدة ضعيفة جداً';
+                } else if (error.code === 'auth/requires-recent-login') {
+                    errorMsg = '❌ يرجى تسجيل الدخول مرة أخرى قبل تغيير كلمة المرور';
+                }
+                passwordChangeError.textContent = errorMsg;
+                passwordChangeError.style.display = 'block';
+            }
+        });
+    }
     
     // الاستماع لطلبات البيانات والثيم من الـ iframe
     window.addEventListener('message', (event) => {
@@ -3526,15 +5813,23 @@ function initEventListeners() {
 function init() {
     console.log('🚀 جاري بدء تطبيق لوحة الدعم...');
     console.log('📦 Collection Name:', COLLECTION_NAME);
-    
-    if (!db) {
+
+    if (!db()) {
         console.error('❌ خطأ: Firebase لم يتم تهيئته بشكل صحيح!');
         showToast('❌ خطأ في تهيئة Firebase!', true);
         return;
     }
-    
+
+    if (supportListenersStarted) {
+        loadGuestUsers(true);
+        return;
+    }
+
+    supportListenersStarted = true;
+
     loadUsers();
     loadAppUsers();
+    loadGuestUsers();
     loadPageViews();
     loadNotificationHistory();
     listenToUserUpdates();
@@ -3543,12 +5838,40 @@ function init() {
 }
 
 function initApp() {
+    console.log('🚀 بدء تهيئة التطبيق...');
+    initializeDOMElements();
     initTheme();
     initEventListeners();
+    initializeShortcuts();
     checkAuthState();
 }
 
+// تهيئة نظام المختصرات بعد تحميل DOM
+function initializeShortcuts() {
+    console.log('initializeShortcuts() called');
+    // الحصول على عناصر DOM - تم تعريفها في initializeDOMElements() من قبل!
+    // تحميل المختصرات من localStorage
+    loadShortcuts();
+    displayShortcuts();
+    addShortcutEventListeners();
+    
+    console.log('✅ تم تهيئة نظام المختصرات');
+}
+
 // تشغيل عند تحميل الصفحة
+// جعل الدوال متاحة عالمياً
+window.handleLogin = handleLogin;
+window.checkAuthState = checkAuthState;
+window.handleLogout = handleLogout;
+window.initApp = initApp;
+window.initializeDOMElements = initializeDOMElements;
+window.deleteShortcut = deleteShortcut;
+window.editShortcut = editShortcut;
+window.selectAndApplyShortcut = selectAndApplyShortcut;
+window.closeShortcutForm = closeShortcutForm;
+window.openSettings = openSettings;
+window.setSettingsPanel = setSettingsPanel;
+
 if (document.readyState === 'loading') {
     window.addEventListener('DOMContentLoaded', initApp);
 } else {
