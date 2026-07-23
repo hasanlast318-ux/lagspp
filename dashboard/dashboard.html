@@ -427,6 +427,173 @@
             return 0;
         };
 
+        // ===================== دوال حضور واتصال المستخدمين =====================
+        const ONLINE_HEARTBEAT_TIMEOUT = 15000;
+        const REPORT_PAGE_HEARTBEAT_TIMEOUT = 9000;
+
+        const formatTime = (ts) => {
+            if (!ts) return '';
+            const date = new Date(toMs(ts));
+            return date.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+        };
+
+        const formatInactiveSince = (timestamp) => {
+            if (!timestamp) return 'غير متوفر';
+            const diff = Math.max(0, Date.now() - toMs(timestamp));
+            const days = Math.floor(diff / 86400000);
+            if (days <= 0) return 'اليوم';
+            if (days === 1) return 'منذ يوم';
+            if (days === 2) return 'منذ يومين';
+            if (days < 7) return `منذ ${days} أيام`;
+            const weeks = Math.floor(days / 7);
+            if (days < 30) return weeks === 1 ? 'منذ أسبوع' : `منذ ${weeks} أسابيع`;
+            const months = Math.floor(days / 30);
+            return months === 1 ? 'منذ شهر' : `منذ ${months} أشهر`;
+        };
+
+        const getFreshTimestamp = (user = {}, keys = []) => {
+            return Math.max(...keys.map(key => toMs(user[key])), 0);
+        };
+
+        const firstTextValue = (...values) => {
+            for (const value of values) {
+                if (typeof value === 'string' && value.trim()) return value.trim();
+            }
+            return '';
+        };
+
+        const getUserLocationText = (user = {}) => {
+            const presence = user.presence || user.userPresence || user.statusInfo || {};
+            const level = user.level || user.currentLevel || user.levelNumber || presence.level || presence.currentLevel || '';
+            const lesson = user.lessonNumber || user.currentLessonNumber || user.lessonNo || user.lesson || presence.lessonNumber || presence.currentLessonNumber || '';
+            const page = firstTextValue(user.currentPage, user.activePage, user.screen, user.route, user.currentRoute);
+            const location = firstTextValue(
+                user.userLocation,
+                user.user_location,
+                user.locationName,
+                user.location_name,
+                user.pageTitle,
+                user.page_title,
+                user.currentPageName,
+                user.current_page_name,
+                user.activePageName,
+                user.screenName,
+                user.screen_name,
+                user.routeName,
+                user.route_name,
+                presence.userLocation,
+                presence.user_location,
+                presence.locationName,
+                presence.pageTitle,
+                presence.currentPageName
+            );
+            const detail = firstTextValue(
+                user.userSubLocation,
+                user.user_sub_location,
+                user.subLocation,
+                user.sub_location,
+                user.innerLocation,
+                user.inner_location,
+                user.sectionName,
+                user.section_name,
+                user.tabName,
+                user.tab_name,
+                user.subPageName,
+                user.sub_page_name,
+                user.currentSectionName,
+                user.current_section_name,
+                user.currentTabName,
+                user.current_tab_name,
+                presence.userSubLocation,
+                presence.subLocation,
+                presence.innerLocation,
+                presence.sectionName,
+                presence.tabName,
+                presence.subPageName,
+                presence.currentSectionName,
+                presence.currentTabName
+            );
+
+            if (level && lesson) return `المستوى ${level} - الدرس ${lesson}`;
+            if (location && detail && location !== detail) return `${location} - ${detail}`;
+            if (location) return location;
+            if (detail) return detail;
+            if (page && !['app', 'report', 'offline'].includes(page.toLowerCase())) return page;
+            return '';
+        };
+
+        const getPresenceState = (user = {}) => {
+            const now = Date.now();
+            const lastActiveAt = getFreshTimestamp(user, [
+                'presenceUpdatedAt',
+                'lastSeen',
+                'lastSeenAt',
+                'userLastSeen',
+                'userLastActiveAt',
+                'lastActive',
+                'lastActiveAt',
+                'updatedAt'
+            ]);
+            const reportPageAt = getFreshTimestamp(user, [
+                'reportPageSeenAt',
+                'reportPageActiveAt',
+                'userInChatAt',
+                'inChatAt',
+                'chatActiveAt'
+            ]);
+            const isFreshOnline = lastActiveAt && now - lastActiveAt <= ONLINE_HEARTBEAT_TIMEOUT;
+            const isFreshInChat = reportPageAt && now - reportPageAt <= REPORT_PAGE_HEARTBEAT_TIMEOUT;
+            const page = String(user.currentPage || user.activePage || user.screen || '').toLowerCase();
+            const explicitOffline = user.userOnline === false || user.online === false || user.isOnline === false || user.user_online === false || user.is_online === false || user.isActive === false;
+            const explicitOutOfChat = user.userInChat === false || user.inChat === false || user.user_in_chat === false || user.in_chat === false;
+            const explicitInChat = user.userInChat === true || user.inChat === true || user.user_in_chat === true || user.in_chat === true || page.includes('report') || page.includes('بلاغ') || page.includes('problem');
+            const explicitOnline = user.userOnline === true || user.online === true || user.active === true || user.isOnline === true || user.user_online === true || user.is_online === true || user.isActive === true;
+            const isStaleExplicitOnline = explicitOnline && lastActiveAt && now - lastActiveAt > ONLINE_HEARTBEAT_TIMEOUT;
+            const locationText = getUserLocationText(user);
+
+            if (explicitOffline) {
+                return {
+                    className: 'offline',
+                    text: lastActiveAt ? `غير متصل - آخر ظهور ${formatTime(lastActiveAt)}` : 'غير متصل',
+                    color: 'from-gray-400 to-gray-500',
+                    dotColor: 'bg-gray-400',
+                    status: 'offline',
+                    lastSeenText: lastActiveAt ? formatInactiveSince(lastActiveAt) : 'غير متوفر'
+                };
+            }
+
+            if ((isFreshInChat && !explicitOutOfChat) || (explicitInChat && isFreshOnline && !explicitOutOfChat)) {
+                return {
+                    className: 'in-chat',
+                    text: 'متصل الآن في صفحة البلاغ',
+                    color: 'from-emerald-400 to-emerald-600',
+                    dotColor: 'bg-emerald-500',
+                    status: 'in-chat',
+                    lastSeenText: 'الآن'
+                };
+            }
+
+            if (isFreshOnline || (explicitOnline && !isStaleExplicitOnline)) {
+                return {
+                    className: 'active-app',
+                    text: locationText ? `متاح في التطبيق - ${locationText}` : 'متاح في التطبيق',
+                    color: 'from-blue-400 to-blue-600',
+                    dotColor: 'bg-blue-500',
+                    status: 'online',
+                    lastSeenText: 'الآن'
+                };
+            }
+
+            return {
+                className: 'offline',
+                text: lastActiveAt ? `غير متصل - آخر ظهور ${formatTime(lastActiveAt)}` : 'غير متصل',
+                color: 'from-gray-400 to-gray-500',
+                dotColor: 'bg-gray-400',
+                status: 'offline',
+                lastSeenText: lastActiveAt ? formatInactiveSince(lastActiveAt) : 'غير متوفر'
+            };
+        };
+
         const getMonthKey = (ts) => {
             const ms = toMs(ts);
             if (!ms) return null;
@@ -482,23 +649,64 @@
             const hasSubData = checkHasSubscriptionData(realUsers);
             const hasBehaviorData = checkHasBehaviorData(realUsers);
 
-            // بناء Map للمستخدمين (دمج من users + reports)
+            // بناء Map للمستخدمين مع منع التكرار (الدمج عبر UID أو البريد الإلكتروني)
             const userMap = new Map();
+            const emailToUid = new Map();
+            const uidToKey = new Map();
+
             realUsers.forEach(u => {
-                const key = u.authUid || u.email || u.id || u.uid || '';
-                if (key) userMap.set(key, { ...u, _key: key, _source: 'users' });
+                const uid = u.authUid || u.uid || u.id || '';
+                const email = (u.email || u.userEmail || '').toLowerCase().trim();
+                const key = uid || email;
+                if (!key) return;
+
+                const userObj = { ...u, _key: key, _source: 'users' };
+                userMap.set(key, userObj);
+
+                if (uid) uidToKey.set(uid, key);
+                if (email) emailToUid.set(email, key);
             });
+
             realReports.forEach(r => {
-                const key = r.userEmail || r.email || r.userId || r.uid || '';
-                if (key && !userMap.has(key)) {
+                const uid = r.userId || r.uid || '';
+                const email = (r.userEmail || r.email || '').toLowerCase().trim();
+
+                // البحث عن مستخدم مطابق مسجل مسبقاً
+                let key = null;
+                if (uid && uidToKey.has(uid)) {
+                    key = uidToKey.get(uid);
+                } else if (email && emailToUid.has(email)) {
+                    key = emailToUid.get(email);
+                }
+
+                if (key) {
+                    const existing = userMap.get(key);
                     userMap.set(key, {
-                        email: r.userEmail || r.email || '',
-                        displayName: r.userName || '',
-                        createdAt: r.timestamp || 0,
-                        _source: 'reports'
+                        ...existing,
+                        ...r,
+                        email: existing.email || r.userEmail || r.email || '',
+                        displayName: existing.displayName || r.userName || '',
+                        createdAt: existing.createdAt || r.timestamp || 0,
+                        _source: 'merged'
                     });
+                } else {
+                    const newKey = uid || email;
+                    if (newKey) {
+                        const newObj = {
+                            ...r,
+                            email: r.userEmail || r.email || '',
+                            displayName: r.userName || '',
+                            createdAt: r.timestamp || 0,
+                            _key: newKey,
+                            _source: 'reports'
+                        };
+                        userMap.set(newKey, newObj);
+                        if (uid) uidToKey.set(uid, newKey);
+                        if (email) emailToUid.set(email, newKey);
+                    }
                 }
             });
+
             const allUsers = Array.from(userMap.values());
 
             // توليد قائمة الأشهر
@@ -837,59 +1045,79 @@
             // خريطة key → label للعرض
             const PAGE_LABEL_MAP = Object.fromEntries(APP_PAGES.map(p => [p.key, p]));
 
-            // بيانات تجريبية تستخدم نفس المفاتيح الحقيقية
-            const DEMO_PAGES = APP_PAGES.map((p, i) => ({
-                page: p.key,
-                label: p.label,
-                icon: p.icon,
-                views: Math.max(50, Math.round(5000 / (i * 0.7 + 1) * (0.8 + Math.random() * 0.4))),
-                uniqueUsers: Math.max(20, Math.round(1400 / (i * 0.75 + 1) * (0.7 + Math.random() * 0.4)))
-            })).sort((a, b) => b.views - a.views);
-
             React.useEffect(() => {
                 setLoading(true);
-                if (!realPageViews || realPageViews.length === 0) {
-                    setPageData(DEMO_PAGES);
-                    setHasRealData(false);
-                    setLoading(false);
-                    return;
-                }
 
-                // ===== معالجة البيانات الحقيقية من الصفحة الرئيسية =====
-                const result = [];
-                realPageViews.forEach(d => {
-                    const pageKey = d.page || d.id;
-                    const views = typeof d.views === 'number' ? d.views : 0;
+                const pageMap = new Map();
 
-                    let uniqueUsers = 0;
-                    if (typeof d.uniqueUsers === 'number') {
-                        uniqueUsers = d.uniqueUsers;
-                    } else if (Array.isArray(d.userIds)) {
-                        uniqueUsers = d.userIds.length;
-                    }
+                // 1. معالجة البيانات الحقيقية من مجموعة pageViews في Firestore
+                if (realPageViews && realPageViews.length > 0) {
+                    realPageViews.forEach(d => {
+                        const pageKey = d.page || d.id;
+                        const views = typeof d.views === 'number' ? d.views : 0;
+                        let uniqueUsers = 0;
+                        let userIdsList = [];
+                        if (typeof d.uniqueUsers === 'number') {
+                            uniqueUsers = d.uniqueUsers;
+                        }
+                        if (Array.isArray(d.userIds)) {
+                            userIdsList = d.userIds;
+                            uniqueUsers = Math.max(uniqueUsers, userIdsList.length);
+                        }
 
-                    if (views === 0 && uniqueUsers === 0) return;
-
-                    const meta = PAGE_LABEL_MAP[pageKey];
-                    result.push({
-                        page: pageKey,
-                        label: meta ? meta.label : pageKey,
-                        icon:  meta ? meta.icon  : 'fa-file-alt',
-                        views,
-                        uniqueUsers
+                        if (views > 0 || uniqueUsers > 0) {
+                            const meta = PAGE_LABEL_MAP[pageKey];
+                            pageMap.set(pageKey, {
+                                page: pageKey,
+                                label: meta ? meta.label : pageKey,
+                                icon:  meta ? meta.icon  : 'fa-file-alt',
+                                views,
+                                uniqueUsers,
+                                userIds: userIdsList
+                            });
+                        }
                     });
-                });
-
-                if (result.length === 0) {
-                    setPageData(DEMO_PAGES);
-                    setHasRealData(false);
-                } else {
-                    result.sort((a, b) => b.views - a.views);
-                    setPageData(result);
-                    setHasRealData(true);
                 }
+
+                // 2. دمج وحساب الزيارات المباشرة الحالية من نشاط حضور المستخدمين الفعلي (allUsers / reports)
+                if (allUsers && allUsers.length > 0) {
+                    allUsers.forEach(u => {
+                        const rawPage = String(u.currentPage || u.activePage || u.screen || '').toLowerCase().trim();
+                        if (rawPage && rawPage !== 'app' && rawPage !== 'offline' && rawPage !== 'report' && rawPage !== '—') {
+                            const meta = PAGE_LABEL_MAP[rawPage];
+                            const pageKey = meta ? meta.key : rawPage;
+                            
+                            const email = u.email || u.userEmail || u.authUid || u.id || 'anonymous';
+                            
+                            if (pageMap.has(pageKey)) {
+                                const existing = pageMap.get(pageKey);
+                                const newUsersList = [...new Set([...existing.userIds, email])];
+                                pageMap.set(pageKey, {
+                                    ...existing,
+                                    views: existing.views + 1,
+                                    uniqueUsers: newUsersList.length,
+                                    userIds: newUsersList
+                                });
+                            } else {
+                                pageMap.set(pageKey, {
+                                    page: pageKey,
+                                    label: meta ? meta.label : pageKey,
+                                    icon:  meta ? meta.icon  : 'fa-file-alt',
+                                    views: 1,
+                                    uniqueUsers: 1,
+                                    userIds: [email]
+                                });
+                            }
+                        }
+                    });
+                }
+
+                const result = Array.from(pageMap.values());
+                result.sort((a, b) => b.views - a.views);
+                setPageData(result);
+                setHasRealData(true); // دائماً حقيقي وليس وهمي
                 setLoading(false);
-            }, [realPageViews]);
+            }, [realPageViews, allUsers]);
 
             const sorted = [...pageData].sort((a, b) => {
                 if (sortBy === 'views') return b.views - a.views;
@@ -958,18 +1186,12 @@
                                 <div>
                                     <h2 className="text-2xl font-black">نشاط المستخدمين في التطبيق</h2>
                                     <p className="text-violet-200 mt-1">تحليل أكثر الصفحات استخداماً وعدد المستخدمين لكل صفحة</p>
-                                </div>
                             </div>
-                            {!hasRealData && (
-                                <div className="bg-white/15 border border-white/30 rounded-xl px-4 py-2 text-sm flex items-center gap-2">
-                                    <i className="fas fa-flask text-violet-200"></i>
-                                    <span className="text-violet-100">بيانات تجريبية</span>
-                                </div>
-                            )}
                         </div>
                     </div>
+                </div>
 
-                    {/* بطاقات ملخص */}
+                {/* بطاقات ملخص */}
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
                         <div className="bg-white rounded-2xl shadow-lg p-5 card-hover border border-gray-100 flex items-center gap-4">
                             <div className="w-14 h-14 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shrink-0">
@@ -1074,45 +1296,176 @@
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
-                                    {sorted.map((item, idx) => {
-                                        const pct = totalViews > 0 ? ((item.views / totalViews) * 100).toFixed(1) : 0;
-                                        const color = PAGE_COLORS[idx % PAGE_COLORS.length];
-                                        return (
-                                            <tr key={idx} className="hover:bg-violet-50/40 transition-colors">
-                                                <td className="px-5 py-4">
-                                                    <span className={`w-8 h-8 rounded-lg bg-gradient-to-r ${color.bg} flex items-center justify-center text-white text-xs font-bold`}>{idx + 1}</span>
-                                                </td>
-                                                <td className="px-5 py-4">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className={`w-9 h-9 rounded-xl bg-gradient-to-r ${color.bg} flex items-center justify-center shrink-0`}>
-                                                            <i className={`fas ${item.icon || 'fa-file-alt'} text-white text-sm`}></i>
+                                    {sorted.length > 0 ? (
+                                        sorted.map((item, idx) => {
+                                            const pct = totalViews > 0 ? ((item.views / totalViews) * 100).toFixed(1) : 0;
+                                            const color = PAGE_COLORS[idx % PAGE_COLORS.length];
+                                            return (
+                                                <tr key={idx} className="hover:bg-violet-50/40 transition-colors">
+                                                    <td className="px-5 py-4">
+                                                        <span className={`w-8 h-8 rounded-lg bg-gradient-to-r ${color.bg} flex items-center justify-center text-white text-xs font-bold`}>{idx + 1}</span>
+                                                    </td>
+                                                    <td className="px-5 py-4">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className={`w-9 h-9 rounded-xl bg-gradient-to-r ${color.bg} flex items-center justify-center shrink-0`}>
+                                                                <i className={`fas ${item.icon || 'fa-file-alt'} text-white text-sm`}></i>
+                                                            </div>
+                                                            <span className="font-semibold text-gray-800 text-sm">{item.label || item.page}</span>
                                                         </div>
-                                                        <span className="font-semibold text-gray-800 text-sm">{item.label || item.page}</span>
-                                                    </div>
-                                                </td>
-                                                <td className="px-5 py-4">
-                                                    <span className="font-black text-gray-800">{item.views.toLocaleString()}</span>
-                                                </td>
-                                                <td className="px-5 py-4">
-                                                    <div className="flex items-center gap-2">
-                                                        <i className="fas fa-user text-gray-400 text-xs"></i>
-                                                        <span className="font-semibold text-gray-700">{item.uniqueUsers.toLocaleString()}</span>
-                                                    </div>
-                                                </td>
-                                                <td className="px-5 py-4">
-                                                    <span className={`px-3 py-1 rounded-full text-xs font-black bg-gradient-to-r ${color.bg} text-white shadow-sm`}>{pct}%</span>
-                                                </td>
-                                                <td className="px-5 py-4 min-w-36">
-                                                    <div className="w-full bg-gray-100 rounded-full h-3">
-                                                        <div className={`h-3 rounded-full bg-gradient-to-r ${color.bg}`}
-                                                            style={{ width: `${pct}%`, transition: 'width 1s ease' }}></div>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
+                                                    </td>
+                                                    <td className="px-5 py-4">
+                                                        <span className="font-black text-gray-800">{item.views.toLocaleString()}</span>
+                                                    </td>
+                                                    <td className="px-5 py-4">
+                                                        <div className="flex items-center gap-2">
+                                                            <i className="fas fa-user text-gray-400 text-xs"></i>
+                                                            <span className="font-semibold text-gray-700">{item.uniqueUsers.toLocaleString()}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-5 py-4">
+                                                        <span className={`px-3 py-1 rounded-full text-xs font-black bg-gradient-to-r ${color.bg} text-white shadow-sm`}>{pct}%</span>
+                                                    </td>
+                                                    <td className="px-5 py-4 min-w-36">
+                                                        <div className="w-full bg-gray-100 rounded-full h-3">
+                                                            <div className={`h-3 rounded-full bg-gradient-to-r ${color.bg}`}
+                                                                style={{ width: `${pct}%`, transition: 'width 1s ease' }}></div>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })
+                                    ) : (
+                                        <tr>
+                                            <td colSpan="6" className="px-5 py-12 text-center text-gray-400">
+                                                <i className="fas fa-chart-line text-5xl mb-3 block text-slate-300"></i>
+                                                لا توجد بيانات مشاهدات حقيقية مسجلة بعد في قاعدة البيانات. بمجرد قيام المستخدمين بتصفح التطبيق، ستظهر الإحصائيات هنا تلقائياً.
+                                            </td>
+                                        </tr>
+                                    )}
                                 </tbody>
                             </table>
+                        </div>
+                    </div>
+
+                    {/* ===== حالة اتصال ونشاط المستخدمين المباشر ===== */}
+                    <div className="bg-white rounded-2xl shadow-xl overflow-hidden mt-8">
+                        <div className="p-6 border-b bg-gradient-to-r from-gray-50 to-white">
+                            <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+                                <div>
+                                    <h3 className="font-bold text-xl text-gray-800">
+                                        <i className="fas fa-wifi text-emerald-500 ml-2 animate-pulse"></i>حالة اتصال ونشاط المستخدمين المباشر
+                                    </h3>
+                                    <p className="text-xs text-gray-400 mt-1">تتبع نشاط المستخدمين وحالة اتصالهم بالاعتماد على آخر ظهور من شاشة الدردشة</p>
+                                </div>
+                                <div className="flex gap-4">
+                                    <div className="bg-emerald-50 text-emerald-700 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2">
+                                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
+                                        <span>نشط الآن: {allUsers.filter(u => {
+                                            const st = getPresenceState(u).status;
+                                            return st === 'online' || st === 'in-chat';
+                                        }).length}</span>
+                                    </div>
+                                    <div className="bg-blue-50 text-blue-700 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2">
+                                        <i className="fas fa-users"></i>
+                                        <span>إجمالي الأجهزة النشطة: {allUsers.filter(u => getFreshTimestamp(u, [
+                                            'presenceUpdatedAt', 'lastSeen', 'lastSeenAt', 'userLastSeen',
+                                            'userLastActiveAt', 'lastActive', 'lastActiveAt', 'updatedAt'
+                                        ]) > 0).length}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="overflow-x-auto">
+                            {allUsers.filter(u => getFreshTimestamp(u, [
+                                'presenceUpdatedAt', 'lastSeen', 'lastSeenAt', 'userLastSeen',
+                                'userLastActiveAt', 'lastActive', 'lastActiveAt', 'updatedAt'
+                            ]) > 0).length > 0 ? (
+                                <table className="min-w-full">
+                                    <thead className="bg-gradient-to-r from-gray-50 to-slate-100">
+                                        <tr>
+                                            {['المستخدم', 'حالة الاتصال', 'الصفحة/الشاشة الحالية', 'آخر نشاط'].map(h => (
+                                                <th key={h} className="px-6 py-4 text-right text-xs font-bold text-gray-600">{h}</th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                        {allUsers
+                                            .map(u => {
+                                                const presence = getPresenceState(u);
+                                                const lastActiveAt = getFreshTimestamp(u, [
+                                                    'presenceUpdatedAt', 'lastSeen', 'lastSeenAt', 'userLastSeen',
+                                                    'userLastActiveAt', 'lastActive', 'lastActiveAt', 'updatedAt'
+                                                ]);
+                                                return { user: u, presence, lastActiveAt };
+                                            })
+                                            .filter(item => item.lastActiveAt > 0)
+                                            .sort((a, b) => b.lastActiveAt - a.lastActiveAt)
+                                            .map((item, idx) => {
+                                                const u = item.user;
+                                                const presence = item.presence;
+                                                const lastActive = item.lastActiveAt;
+                                                
+                                                // تحديد الشاشة أو الموقع
+                                                const locationText = getUserLocationText(u);
+                                                const rawPage = String(u.currentPage || u.activePage || u.screen || '').toLowerCase();
+                                                const mappedPage = PAGE_LABEL_MAP[rawPage]?.label || rawPage || '—';
+                                                
+                                                let displayPage = mappedPage;
+                                                if (locationText && locationText !== rawPage && locationText !== mappedPage) {
+                                                    displayPage = `${mappedPage} (${locationText})`;
+                                                }
+
+                                                return (
+                                                    <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                                                        <td className="px-6 py-4">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="w-10 h-10 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 font-bold shrink-0 text-base shadow-sm">
+                                                                    {u.displayName ? u.displayName.charAt(0).toUpperCase() : '👤'}
+                                                                </div>
+                                                                <div>
+                                                                    <span className="font-semibold text-gray-800 text-sm block">{u.displayName || u.userName || 'مستخدم LangHub'}</span>
+                                                                    <span className="text-gray-400 text-xs font-mono">{u.email || u.userEmail || '—'}</span>
+                                                                </div>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className={`w-2.5 h-2.5 rounded-full ${presence.dotColor} ${presence.status !== 'offline' ? 'animate-ping' : ''}`}></span>
+                                                                <span className={`px-3 py-1 rounded-full text-xs font-bold bg-gradient-to-r ${presence.color} text-white shadow-sm`}>
+                                                                    {presence.status === 'in-chat' ? 'متصل الآن في صفحة الدعم' : presence.status === 'online' ? 'نشط في التطبيق' : 'غير متصل'}
+                                                                </span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="flex items-center gap-2">
+                                                                {presence.status !== 'offline' ? (
+                                                                    <i className="fas fa-desktop text-blue-500 text-xs"></i>
+                                                                ) : (
+                                                                    <i className="fas fa-history text-gray-400 text-xs"></i>
+                                                                )}
+                                                                <span className="text-gray-700 font-semibold text-sm">{displayPage}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="text-sm">
+                                                                <span className="font-medium text-gray-800">{presence.lastSeenText}</span>
+                                                                {lastActive > 0 && (
+                                                                    <span className="text-gray-400 text-xs block mt-0.5">{new Date(lastActive).toLocaleString('ar-EG', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}</span>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                    </tbody>
+                                </table>
+                            ) : (
+                                <div className="text-center text-gray-400 py-16">
+                                    <i className="fas fa-users-slash text-5xl mb-3 block text-slate-300"></i>
+                                    لا توجد بيانات اتصال أو نشاط نشط للمستخدمين حالياً
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -1226,12 +1579,688 @@ object PageTracker {
             );
         };
 
+        // ===================== مكون إدارة تحديثات التطبيق (AppUpdatesTab) =====================
+        const AppUpdatesTab = ({ rawUsers, db }) => {
+            const [title, setTitle] = React.useState('تحديث جديد متوفر');
+            const [message, setMessage] = React.useState('يتوفر إصدار أحدث من التطبيق يحتوي على تحسينات وإصلاحات مهمة. يرجى تحديث التطبيق للاستمرار في استخدام جميع الميزات بأفضل أداء.');
+            const [updateUrl, setUpdateUrl] = React.useState('');
+            const [isMandatory, setIsMandatory] = React.useState(false);
+            const [targetingType, setTargetingType] = React.useState('all');
+            const [selectedVersions, setSelectedVersions] = React.useState([]);
+            const [minVersion, setMinVersion] = React.useState('');
+            const [maxVersion, setMaxVersion] = React.useState('');
+            const [isActive, setIsActive] = React.useState(true);
+            const [saving, setSaving] = React.useState(false);
+
+            // local search/filters for users list
+            const [searchTerm, setSearchTerm] = React.useState('');
+            const [filterVersion, setFilterVersion] = React.useState('all');
+            const [filterTargetState, setFilterTargetState] = React.useState('all'); // 'all', 'targeted', 'not_targeted'
+            const [currentPage, setCurrentPage] = React.useState(1);
+            const itemsPerPage = 10;
+
+            const [isDark, setIsDark] = React.useState(document.body.classList.contains('dark-mode'));
+
+            React.useEffect(() => {
+                const handler = (e) => setIsDark(e.detail.theme === 'dark');
+                window.addEventListener('dashboardThemeChanged', handler);
+                return () => window.removeEventListener('dashboardThemeChanged', handler);
+            }, []);
+
+            // fetch current configuration from firestore
+            React.useEffect(() => {
+                if (!db) return;
+                const unsub = db.collection('appUpdates').doc('settings').onSnapshot(docSnap => {
+                    if (docSnap.exists) {
+                        const data = docSnap.data();
+                        setTitle(data.title || 'تحديث جديد متوفر');
+                        setMessage(data.message || '');
+                        setUpdateUrl(data.updateUrl || '');
+                        setIsMandatory(data.isMandatory || false);
+                        setTargetingType(data.targetingType || 'all');
+                        setSelectedVersions(data.selectedVersions || []);
+                        setMinVersion(data.minVersion || '');
+                        setMaxVersion(data.maxVersion || '');
+                        setIsActive(data.isActive !== undefined ? data.isActive : true);
+                    }
+                }, err => {
+                    console.error("Error reading updates settings:", err);
+                });
+                return () => unsub();
+            }, [db]);
+
+            // Version helpers
+            const getAppVersion = (user = {}) => {
+                return String(
+                    user.appVersion ||
+                    user.app_version ||
+                    user.applicationVersion ||
+                    user.application_version ||
+                    user.version ||
+                    user.buildVersion ||
+                    user.build_number ||
+                    user.clientVersion ||
+                    ''
+                ).trim();
+            };
+
+            const compareVersions = (v1, v2) => {
+                const parts1 = String(v1).replace(/[^0-9.]/g, '').split('.').map(Number);
+                const parts2 = String(v2).replace(/[^0-9.]/g, '').split('.').map(Number);
+                const maxLen = Math.max(parts1.length, parts2.length);
+                for (let i = 0; i < maxLen; i++) {
+                    const p1 = parts1[i] || 0;
+                    const p2 = parts2[i] || 0;
+                    if (p1 < p2) return -1;
+                    if (p1 > p2) return 1;
+                }
+                return 0;
+            };
+
+            // FCM token extractor helper
+            const getFcmTokens = (user = {}) => {
+                const tokens = [];
+                [
+                    user.fcmToken,
+                    user.fcm_token,
+                    user.messagingToken,
+                    user.notificationToken,
+                    user.deviceToken,
+                    user.pushToken,
+                    user.tokens,
+                    user.fcmTokens,
+                    user.notificationTokens
+                ].forEach(value => {
+                    if (Array.isArray(value)) tokens.push(...value);
+                    else if (value && typeof value === 'object') tokens.push(...Object.values(value));
+                    else if (typeof value === 'string') tokens.push(value);
+                });
+                return [...new Set(tokens.filter(Boolean))];
+            };
+
+            // List of unique versions in the database
+            const availableVersions = React.useMemo(() => {
+                const versionsSet = new Set();
+                rawUsers.forEach(u => {
+                    const v = getAppVersion(u);
+                    if (v) versionsSet.add(v);
+                });
+                return Array.from(versionsSet).sort((a, b) => compareVersions(a, b));
+            }, [rawUsers]);
+
+            // Determine if a user is targeted by the current config inputs
+            const isUserTargetedByConfig = React.useCallback((user) => {
+                if (!isActive) return false;
+                const v = getAppVersion(user);
+                if (!v) return false;
+
+                if (targetingType === 'all') {
+                    return true;
+                }
+                if (targetingType === 'specific') {
+                    return selectedVersions.includes(v);
+                }
+                if (targetingType === 'below') {
+                    return minVersion ? compareVersions(v, minVersion) < 0 : false;
+                }
+                if (targetingType === 'above') {
+                    return maxVersion ? compareVersions(v, maxVersion) > 0 : false;
+                }
+                if (targetingType === 'range') {
+                    const matchMin = minVersion ? compareVersions(v, minVersion) >= 0 : true;
+                    const matchMax = maxVersion ? compareVersions(v, maxVersion) <= 0 : true;
+                    return matchMin && matchMax;
+                }
+                return false;
+            }, [isActive, targetingType, selectedVersions, minVersion, maxVersion]);
+
+            // Targeted users count
+            const targetedUsers = React.useMemo(() => {
+                return rawUsers.filter(isUserTargetedByConfig);
+            }, [rawUsers, isUserTargetedByConfig]);
+
+            // Stats calculations
+            const latestDbVersion = React.useMemo(() => {
+                return availableVersions[availableVersions.length - 1] || '7.15';
+            }, [availableVersions]);
+
+            const outdatedUsersCount = React.useMemo(() => {
+                return rawUsers.filter(u => {
+                    const v = getAppVersion(u);
+                    return v && compareVersions(v, latestDbVersion) < 0;
+                }).length;
+            }, [rawUsers, latestDbVersion]);
+
+            const outdatedPercentage = React.useMemo(() => {
+                return rawUsers.length > 0 ? ((outdatedUsersCount / rawUsers.length) * 100).toFixed(1) : '0';
+            }, [rawUsers, outdatedUsersCount]);
+
+            const versionCounts = React.useMemo(() => {
+                const counts = {};
+                rawUsers.forEach(u => {
+                    const v = getAppVersion(u) || 'غير معروف';
+                    counts[v] = (counts[v] || 0) + 1;
+                });
+                return counts;
+            }, [rawUsers]);
+
+            // Save settings to database
+            const saveSettings = async (overrideData = {}) => {
+                setSaving(true);
+                try {
+                    const configData = {
+                        title,
+                        message,
+                        updateUrl,
+                        isMandatory,
+                        targetingType,
+                        selectedVersions,
+                        minVersion,
+                        maxVersion,
+                        isActive: overrideData.isActive !== undefined ? overrideData.isActive : isActive,
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    };
+                    await db.collection('appUpdates').doc('settings').set(configData);
+                    alert('تم حفظ إعدادات التحديث بنجاح!');
+                } catch (err) {
+                    console.error("Error saving settings:", err);
+                    alert('خطأ أثناء حفظ الإعدادات: ' + err.message);
+                } finally {
+                    setSaving(false);
+                }
+            };
+
+            // Toggle active status
+            const handleToggleActive = async () => {
+                const nextActive = !isActive;
+                setIsActive(nextActive);
+                await saveSettings({ isActive: nextActive });
+            };
+
+            // Send notification requests to targeted users
+            const handleSendNotification = async () => {
+                if (!title || !message) {
+                    alert('الرجاء كتابة العنوان والرسالة أولاً.');
+                    return;
+                }
+                if (targetedUsers.length === 0) {
+                    alert('لا يوجد مستخدمين مستهدفين بناءً على الفلاتر المحددة.');
+                    return;
+                }
+
+                if (!confirm(`هل أنت متأكد من إرسال إشعار التحديث لـ ${targetedUsers.length} مستخدم مستهدف؟`)) {
+                    return;
+                }
+
+                setSaving(true);
+                try {
+                    // Save config first
+                    const configData = {
+                        title,
+                        message,
+                        updateUrl,
+                        isMandatory,
+                        targetingType,
+                        selectedVersions,
+                        minVersion,
+                        maxVersion,
+                        isActive: true,
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    };
+                    await db.collection('appUpdates').doc('settings').set(configData);
+
+                    // Map users to recipients
+                    const recipients = targetedUsers.map(u => ({
+                        userKey: u.authUid || u.email || u.id || u.uid || '',
+                        userId: u.userId || u.uid || '',
+                        name: u.displayName || u.userName || 'مستخدم مجهول',
+                        email: u.email || u.userEmail || '',
+                        tokens: getFcmTokens(u)
+                    })).filter(r => r.userKey);
+
+                    // Add to notificationRequests
+                    await db.collection('notificationRequests').add({
+                        title,
+                        body: message,
+                        link: 'custom_path',
+                        customLink: updateUrl,
+                        status: 'pending',
+                        createdAt: Date.now(),
+                        createdBy: auth()?.currentUser?.email || 'System (App Update)',
+                        recipientCount: recipients.length,
+                        recipients: recipients
+                    });
+
+                    alert(`تم حفظ التحديث وجدولة إرسال الإشعار لـ ${recipients.length} مستخدم بنجاح!`);
+                } catch (err) {
+                    console.error("Error sending update notification:", err);
+                    alert('خطأ في إرسال الإشعار: ' + err.message);
+                } finally {
+                    setSaving(false);
+                }
+            };
+
+            // Filter users list for rendering
+            const getFilteredUsers = () => {
+                return rawUsers.filter(u => {
+                    const v = getAppVersion(u);
+                    const name = (u.displayName || u.userName || '').toLowerCase();
+                    const email = (u.email || u.userEmail || '').toLowerCase();
+                    const matchSearch = name.includes(searchTerm.toLowerCase()) || email.includes(searchTerm.toLowerCase()) || v.includes(searchTerm);
+                    
+                    const matchVersion = filterVersion === 'all' || (filterVersion === 'unknown' && !v) || v === filterVersion;
+                    
+                    const isTargeted = isUserTargetedByConfig(u);
+                    const matchTarget = filterTargetState === 'all' || 
+                                       (filterTargetState === 'targeted' && isTargeted) ||
+                                       (filterTargetState === 'not_targeted' && !isTargeted);
+
+                    return matchSearch && matchVersion && matchTarget;
+                });
+            };
+
+            const filteredUsers = getFilteredUsers();
+            const totalPages = Math.ceil(filteredUsers.length / itemsPerPage);
+            const paginatedUsers = filteredUsers.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+            React.useEffect(() => {
+                setCurrentPage(1);
+            }, [searchTerm, filterVersion, filterTargetState, targetingType]);
+
+            // Version checkboxes management for 'specific' targeting
+            const handleVersionCheckboxChange = (version) => {
+                if (selectedVersions.includes(version)) {
+                    setSelectedVersions(selectedVersions.filter(v => v !== version));
+                } else {
+                    setSelectedVersions([...selectedVersions, version]);
+                }
+            };
+
+            return (
+                <div className="space-y-6" style={{direction: 'rtl'}}>
+                    {/* رأس الصفحة */}
+                    <div className="bg-gradient-to-br from-indigo-700 to-purple-800 rounded-3xl p-8 text-white shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-6 relative overflow-hidden">
+                        <div className="absolute right-0 top-0 opacity-10 transform translate-x-12 -translate-y-12">
+                            <i className="fas fa-sync-alt text-9xl"></i>
+                        </div>
+                        <div className="z-10">
+                            <h2 className="text-3xl font-black mb-2">نظام إدارة تحديثات التطبيق</h2>
+                            <p className="text-indigo-100 max-w-2xl text-sm leading-relaxed">
+                                تحكم في تحديثات التطبيق بشكل فوري ومرن. يمكنك إرسال إشعارات تحديث إجبارية أو اختيارية للمستخدمين، واستهداف إصدارات معينة من التطبيق، ومتابعة إحصائيات الإصدارات الحالية.
+                            </p>
+                        </div>
+                        <div className="flex gap-3 z-10">
+                            <button onClick={handleToggleActive} disabled={saving}
+                                className={`px-6 py-3 rounded-2xl font-bold flex items-center gap-2 shadow-lg transition-all duration-300 hover:scale-105 active:scale-95 ${isActive ? 'bg-emerald-500 hover:bg-emerald-600 text-white' : 'bg-rose-500 hover:bg-rose-600 text-white'}`}>
+                                <i className={`fas ${isActive ? 'fa-check-circle' : 'fa-times-circle'}`}></i>
+                                <span>{isActive ? 'التحديثات نشطة' : 'التحديثات متوقفة'}</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* الإحصائيات السريعة */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                        <div className="rounded-2xl shadow-md p-6 bg-white border border-gray-100" style={{backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-light)'}}>
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="text-sm font-semibold mb-1" style={{color: 'var(--text-secondary)'}}>إجمالي المستخدمين</p>
+                                    <h3 className="text-3xl font-black" style={{color: 'var(--text-primary)'}}>{rawUsers.length}</h3>
+                                </div>
+                                <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-blue-100 text-blue-600">
+                                    <i className="fas fa-users text-xl"></i>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="rounded-2xl shadow-md p-6 bg-white border border-gray-100" style={{backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-light)'}}>
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="text-sm font-semibold mb-1" style={{color: 'var(--text-secondary)'}}>أحدث إصدار متوفر</p>
+                                    <h3 className="text-3xl font-black text-emerald-600 font-mono">v{latestDbVersion}</h3>
+                                </div>
+                                <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-emerald-100 text-emerald-600">
+                                    <i className="fas fa-code-branch text-xl"></i>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="rounded-2xl shadow-md p-6 bg-white border border-gray-100" style={{backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-light)'}}>
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="text-sm font-semibold mb-1" style={{color: 'var(--text-secondary)'}}>مخدمون بإصدار قديم</p>
+                                    <h3 className="text-3xl font-black text-amber-600">{outdatedUsersCount}</h3>
+                                </div>
+                                <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-amber-100 text-amber-600">
+                                    <i className="fas fa-history text-xl"></i>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="rounded-2xl shadow-md p-6 bg-white border border-gray-100" style={{backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-light)'}}>
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="text-sm font-semibold mb-1" style={{color: 'var(--text-secondary)'}}>نسبة الإصدارات القديمة</p>
+                                    <h3 className="text-3xl font-black text-rose-500">{outdatedPercentage}%</h3>
+                                </div>
+                                <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-rose-100 text-rose-500">
+                                    <i className="fas fa-percent text-xl"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* لوحة التحكم وتقسيم العمل */}
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        {/* عمود إعدادات التحديث (2/3 من العرض) */}
+                        <div className="lg:col-span-2 rounded-2xl shadow-md p-6 bg-white border border-gray-100 space-y-6" style={{backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-light)', color: 'var(--text-primary)'}}>
+                            <div className="border-b pb-4" style={{borderColor: 'var(--border-light)'}}>
+                                <h3 className="text-xl font-bold flex items-center gap-2">
+                                    <i className="fas fa-sliders-h text-indigo-600"></i>
+                                    <span>إعدادات إشعار التحديث الجديد</span>
+                                </h3>
+                                <p className="text-xs text-gray-400 mt-1">قم بتعبئة بيانات نافذة التحديث التي ستظهر للمستخدمين داخل التطبيق</p>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="md:col-span-2">
+                                    <label className="block text-sm font-bold mb-2">عنوان النافذة المنبثقة (Title) <span className="text-red-500">*</span></label>
+                                    <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="مثال: تحديث جديد متوفر"
+                                        className="w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold" style={{backgroundColor: 'var(--input-bg)', color: 'var(--input-text)', borderColor: 'var(--input-border)'}} />
+                                </div>
+
+                                <div className="md:col-span-2">
+                                    <label className="block text-sm font-bold mb-2">نص الرسالة للتحديث (Message) <span className="text-red-500">*</span></label>
+                                    <textarea value={message} onChange={e => setMessage(e.target.value)} rows="4" placeholder="اكتب تفاصيل التحديث هنا..."
+                                        className="w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:border-indigo-500 text-sm leading-relaxed" style={{backgroundColor: 'var(--input-bg)', color: 'var(--input-text)', borderColor: 'var(--input-border)'}}></textarea>
+                                </div>
+
+                                <div className="md:col-span-2">
+                                    <label className="block text-sm font-bold mb-2">رابط تحميل النسخة الجديدة (Update URL) <span className="text-red-500">*</span></label>
+                                    <input type="url" value={updateUrl} onChange={e => setUpdateUrl(e.target.value)} placeholder="https://example.com/app-release.apk"
+                                        className="w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:border-indigo-500 font-mono text-xs text-left" style={{backgroundColor: 'var(--input-bg)', color: 'var(--input-text)', borderColor: 'var(--input-border)', direction: 'ltr'}} />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-bold mb-2">نوع التحديث</label>
+                                    <div className="flex gap-4 p-1 bg-gray-100 rounded-xl w-fit" style={{backgroundColor: 'var(--bg-gray-200)'}}>
+                                        <button type="button" onClick={() => setIsMandatory(false)}
+                                            className={`px-6 py-2 rounded-lg font-bold transition text-sm ${!isMandatory ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-800'}`} style={{backgroundColor: !isMandatory ? 'var(--bg-card)' : 'transparent', color: !isMandatory ? 'var(--text-primary)' : ''}}>
+                                            اختياري (يمكن إغلاقه)
+                                        </button>
+                                        <button type="button" onClick={() => setIsMandatory(true)}
+                                            className={`px-6 py-2 rounded-lg font-bold transition text-sm ${isMandatory ? 'bg-red-500 text-white shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}>
+                                            إلزامي (يمنع استخدام التطبيق)
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* الفلترة واستهداف المستخدمين */}
+                            <div className="border-t pt-6 space-y-4" style={{borderColor: 'var(--border-light)'}}>
+                                <div>
+                                    <h4 className="text-lg font-bold">🎯 تحديد الفئة المستهدفة بالتحديث</h4>
+                                    <p className="text-xs text-gray-400 mt-1">اختر طريقة تحديد المستخدمين الذين سيطلب منهم التحديث</p>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                                    <div className="md:col-span-2">
+                                        <label className="block text-sm font-bold mb-2">نوع الاستهداف</label>
+                                        <select value={targetingType} onChange={e => setTargetingType(e.target.value)}
+                                            className="w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:border-indigo-500 font-bold" style={{backgroundColor: 'var(--input-bg)', color: 'var(--input-text)', borderColor: 'var(--input-border)'}}>
+                                            <option value="all">جميع المستخدمين</option>
+                                            <option value="specific">إصدارات محددة (متعدد)</option>
+                                            <option value="below">جميع الإصدارات أقل من إصدار معين</option>
+                                            <option value="above">جميع الإصدارات أعلى من إصدار معين</option>
+                                            <option value="range">نطاق إصدارات محدد (من - إلى)</option>
+                                        </select>
+                                    </div>
+
+                                    {/* الحقول التفاعلية حسب نوع الاستهداف */}
+                                    {targetingType === 'specific' && (
+                                        <div className="md:col-span-3">
+                                            <label className="block text-sm font-bold mb-2">اختر الإصدارات المستهدفة:</label>
+                                            {availableVersions.length > 0 ? (
+                                                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 p-3 border rounded-xl max-h-32 overflow-y-auto" style={{borderColor: 'var(--border-light)'}}>
+                                                    {availableVersions.map(v => (
+                                                        <label key={v} className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
+                                                            <input type="checkbox" checked={selectedVersions.includes(v)} onChange={() => handleVersionCheckboxChange(v)}
+                                                                className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4" />
+                                                            <span>v{v}</span>
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <p className="text-xs text-gray-400 p-3">لا توجد إصدارات مسجلة بعد.</p>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {targetingType === 'below' && (
+                                        <div className="md:col-span-3">
+                                            <label className="block text-sm font-bold mb-2">أقل من الإصدار:</label>
+                                            <input type="text" value={minVersion} onChange={e => setMinVersion(e.target.value)} placeholder="مثال: 7.15"
+                                                className="w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:border-indigo-500 font-mono text-sm" style={{backgroundColor: 'var(--input-bg)', color: 'var(--input-text)', borderColor: 'var(--input-border)', direction: 'ltr'}} />
+                                        </div>
+                                    )}
+
+                                    {targetingType === 'above' && (
+                                        <div className="md:col-span-3">
+                                            <label className="block text-sm font-bold mb-2">أعلى من الإصدار:</label>
+                                            <input type="text" value={maxVersion} onChange={e => setMaxVersion(e.target.value)} placeholder="مثال: 7.0.0"
+                                                className="w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:border-indigo-500 font-mono text-sm" style={{backgroundColor: 'var(--input-bg)', color: 'var(--input-text)', borderColor: 'var(--input-border)', direction: 'ltr'}} />
+                                        </div>
+                                    )}
+
+                                    {targetingType === 'range' && (
+                                        <div className="md:col-span-3 grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-xs font-bold mb-1">أعلى من أو يساوي:</label>
+                                                <input type="text" value={minVersion} onChange={e => setMinVersion(e.target.value)} placeholder="1.0.0"
+                                                    className="w-full px-3 py-2 border-2 rounded-xl focus:outline-none focus:border-indigo-500 font-mono text-sm" style={{backgroundColor: 'var(--input-bg)', color: 'var(--input-text)', borderColor: 'var(--input-border)', direction: 'ltr'}} />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-bold mb-1">أقل من أو يساوي:</label>
+                                                <input type="text" value={maxVersion} onChange={e => setMaxVersion(e.target.value)} placeholder="7.0.0"
+                                                    className="w-full px-3 py-2 border-2 rounded-xl focus:outline-none focus:border-indigo-500 font-mono text-sm" style={{backgroundColor: 'var(--input-bg)', color: 'var(--input-text)', borderColor: 'var(--input-border)', direction: 'ltr'}} />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* الإجراءات */}
+                            <div className="border-t pt-6 flex flex-wrap gap-4" style={{borderColor: 'var(--border-light)'}}>
+                                <button onClick={() => saveSettings()} disabled={saving}
+                                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition hover:scale-105 active:scale-95 disabled:opacity-50">
+                                    <i className="fas fa-save"></i>
+                                    <span>حفظ وتفعيل التحديث</span>
+                                </button>
+                                <button onClick={handleSendNotification} disabled={saving}
+                                    className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition hover:scale-105 active:scale-95 disabled:opacity-50">
+                                    <i className="fas fa-paper-plane"></i>
+                                    <span>إرسال الإشعار للفئة المستهدفة</span>
+                                </button>
+                                {isActive && (
+                                    <button onClick={handleToggleActive} disabled={saving}
+                                        className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition hover:scale-105 active:scale-95" style={{backgroundColor: 'var(--bg-gray-200)', color: 'var(--text-primary)'}}>
+                                        <i className="fas fa-power-off text-rose-500"></i>
+                                        <span>إيقاف الإشعار مؤقتاً</span>
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* عمود المعاينة السريعة والتقسيم النسبي (1/3 من العرض) */}
+                        <div className="rounded-2xl shadow-md p-6 bg-white border border-gray-100 flex flex-col justify-between space-y-6" style={{backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-light)', color: 'var(--text-primary)'}}>
+                            <div className="space-y-6">
+                                <div className="border-b pb-4" style={{borderColor: 'var(--border-light)'}}>
+                                    <h3 className="text-xl font-bold flex items-center gap-2">
+                                        <i className="fas fa-eye text-purple-600"></i>
+                                        <span>مراجعة الفئة المستهدفة</span>
+                                    </h3>
+                                    <p className="text-xs text-gray-400 mt-1">تأكد من المستخدمين المستهدفين قبل تفعيل التحديث</p>
+                                </div>
+
+                                {/* المعاينة الدائرية للمستهدفين */}
+                                <div className="flex flex-col items-center justify-center p-6 bg-gray-50 rounded-2xl relative" style={{backgroundColor: 'var(--bg-gray-50)'}}>
+                                    <div className="w-28 h-28 rounded-full border-4 border-dashed border-indigo-500 flex flex-col items-center justify-center relative">
+                                        <span className="text-3xl font-black text-indigo-600">{targetedUsers.length}</span>
+                                        <span className="text-[10px] text-gray-400 font-bold mt-1">مستهدف</span>
+                                    </div>
+                                    <p className="text-xs font-semibold text-center mt-4" style={{color: 'var(--text-secondary)'}}>
+                                        تم استهداف {targetedUsers.length} مستخدم من أصل {rawUsers.length} إجمالي المستخدمين المسجلين في لوحة التحكم.
+                                    </p>
+                                    <p className="text-[10px] text-indigo-500 font-black text-center mt-1">
+                                        نسبة الاستهداف: {rawUsers.length > 0 ? ((targetedUsers.length / rawUsers.length) * 100).toFixed(1) : 0}%
+                                    </p>
+                                </div>
+
+                                {/* توزيع المستخدمين حسب الإصدارات */}
+                                <div className="space-y-3">
+                                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider">توزيع المستخدمين لكل إصدار</h4>
+                                    <div className="max-h-36 overflow-y-auto space-y-2 pr-1">
+                                        {Object.keys(versionCounts).map(v => (
+                                            <div key={v} className="flex justify-between items-center text-xs p-2 rounded-lg bg-gray-50 border border-gray-100" style={{backgroundColor: 'var(--bg-gray-50)', borderColor: 'var(--border-light)'}}>
+                                                <span className="font-bold">v{v}</span>
+                                                <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 font-bold">{versionCounts[v]} مستخدم</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 leading-relaxed" style={{backgroundColor: 'rgba(245,158,11,0.05)', borderColor: 'rgba(245,158,11,0.2)'}}>
+                                <i className="fas fa-exclamation-triangle ml-1"></i>
+                                <strong>تنويه:</strong> عند حفظ التحديث كـ <strong>"إلزامي"</strong>، سيمنع التطبيق أي مستخدم يستعمل إصداراً قديماً من استخدام التطبيق فوراً حتى يقوم بالتحديث من الرابط المحدد.
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* جدول المستخدمين وتفاصيل الإصدارات */}
+                    <div className="rounded-2xl shadow-md overflow-hidden bg-white border border-gray-100" style={{backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-light)', color: 'var(--text-primary)'}}>
+                        <div className="p-6 border-b flex flex-col md:flex-row md:items-center justify-between gap-4" style={{borderColor: 'var(--border-light)'}}>
+                            <div>
+                                <h3 className="text-xl font-bold">📂 سجل إصدارات المستخدمين</h3>
+                                <p className="text-xs text-gray-400 mt-1">قائمة تفصيلية بجميع المستخدمين وإصدار التطبيق الخاص بكل منهم</p>
+                            </div>
+                            
+                            <div className="flex flex-wrap items-center gap-3">
+                                {/* مربع البحث */}
+                                <div className="relative">
+                                    <input type="text" placeholder="بحث باسم أو بريد أو إصدار..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+                                        className="px-4 py-2 border rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 w-60" style={{backgroundColor: 'var(--input-bg)', color: 'var(--input-text)', borderColor: 'var(--input-border)'}} />
+                                    <i className="fas fa-search absolute left-3 top-3 text-gray-400 text-xs"></i>
+                                </div>
+
+                                {/* فلترة بالإصدار */}
+                                <select value={filterVersion} onChange={e => setFilterVersion(e.target.value)}
+                                    className="px-4 py-2 border rounded-xl text-sm focus:outline-none font-semibold" style={{backgroundColor: 'var(--input-bg)', color: 'var(--input-text)', borderColor: 'var(--input-border)'}}>
+                                    <option value="all">جميع الإصدارات</option>
+                                    <option value="unknown">غير محدد</option>
+                                    {availableVersions.map(v => (
+                                        <option key={v} value={v}>الإصدار v{v}</option>
+                                    ))}
+                                </select>
+
+                                {/* فلترة بالاستهداف */}
+                                <select value={filterTargetState} onChange={e => setFilterTargetState(e.target.value)}
+                                    className="px-4 py-2 border rounded-xl text-sm focus:outline-none font-semibold" style={{backgroundColor: 'var(--input-bg)', color: 'var(--input-text)', borderColor: 'var(--input-border)'}}>
+                                    <option value="all">جميع حالات التحديث</option>
+                                    <option value="targeted">المستهدفون بالتحديث</option>
+                                    <option value="not_targeted">غير المستهدفين</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* الجدول */}
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-right">
+                                <thead className="bg-gray-50 border-b-2" style={{backgroundColor: 'var(--bg-gray-100)', borderColor: 'var(--border-light)', color: 'var(--text-secondary)'}}>
+                                    <tr>
+                                        {['الاسم والبريد الإلكتروني', 'إصدار التطبيق الحالي', 'حالة الاستهداف بالتحديث', 'حالة الباقة', 'آخر نشاط'].map(h => (
+                                            <th key={h} className="px-6 py-4 text-sm font-bold">{h}</th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y" style={{borderColor: 'var(--border-light)'}}>
+                                    {paginatedUsers.length > 0 ? paginatedUsers.map((u, i) => {
+                                        const v = getAppVersion(u);
+                                        const isTargeted = isUserTargetedByConfig(u);
+                                        const planType = u.subscriptionPlan || u.plan || 'free';
+                                        
+                                        return (
+                                            <tr key={i} className="hover:bg-gray-50 transition-colors" style={{borderColor: 'var(--border-light)'}}>
+                                                <td className="px-6 py-4">
+                                                    <div className="font-bold">{u.displayName || u.userName || 'مستخدم مجهول'}</div>
+                                                    <div className="text-xs text-gray-400 font-mono">{u.email || u.userEmail || '—'}</div>
+                                                </td>
+                                                <td className="px-6 py-4 font-mono">
+                                                    {v ? (
+                                                        <span className="px-2 py-1 rounded bg-gray-100 font-bold text-xs" style={{backgroundColor: 'var(--bg-gray-200)'}}>v{v}</span>
+                                                    ) : (
+                                                        <span className="text-gray-400 text-xs">غير متوفر</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    {isTargeted ? (
+                                                        <span className="px-3 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-700">مستهدف بالتحديث</span>
+                                                    ) : (
+                                                        <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">محدث / غير مستهدف</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${planType !== 'free' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}>
+                                                        {planType !== 'free' ? 'باقة مدفوعة (PRO)' : 'باقة مجانية'}
+                                                    </span>
+                                                </td>
+                                                <td className="px-6 py-4 text-xs font-semibold text-gray-400">
+                                                    {u.lastActive ? new Date(u.lastActive).toLocaleString('ar-SA') : 'غير متوفر'}
+                                                </td>
+                                            </tr>
+                                        );
+                                    }) : (
+                                        <tr>
+                                            <td colSpan="5" className="px-6 py-12 text-center text-gray-400">
+                                                <i className="fas fa-inbox text-3xl mb-2 block"></i>
+                                                لا توجد نتائج تطابق خيارات التصفية والبحث.
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {/* الصفحات */}
+                        {totalPages > 1 && (
+                            <div className="px-6 py-4 flex justify-center items-center gap-2 border-t" style={{backgroundColor: 'var(--bg-gray-50)', borderColor: 'var(--border-light)'}}>
+                                <button disabled={currentPage === 1} onClick={() => setCurrentPage(currentPage - 1)}
+                                    className={`px-4 py-2 rounded-lg font-bold text-xs ${currentPage === 1 ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-80 bg-indigo-600 text-white'}`} style={{backgroundColor: currentPage === 1 ? 'var(--bg-gray-200)' : '#4f46e5', color: currentPage === 1 ? 'var(--text-muted)' : 'white'}}>
+                                    السابق
+                                </button>
+                                {Array.from({ length: totalPages }).map((_, i) => (
+                                    <button key={i + 1} onClick={() => setCurrentPage(i + 1)}
+                                        className={`px-3 py-1.5 rounded-lg font-bold text-xs ${currentPage === i + 1 ? 'text-white' : 'opacity-70 hover:opacity-100'}`} style={{backgroundColor: currentPage === i + 1 ? '#4f46e5' : 'var(--bg-gray-200)', color: currentPage === i + 1 ? 'white' : 'var(--text-primary)'}}>
+                                        {i + 1}
+                                    </button>
+                                ))}
+                                <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(currentPage + 1)}
+                                    className={`px-4 py-2 rounded-lg font-bold text-xs ${currentPage === totalPages ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-80 bg-indigo-600 text-white'}`} style={{backgroundColor: currentPage === totalPages ? 'var(--bg-gray-200)' : '#4f46e5', color: currentPage === totalPages ? 'var(--text-muted)' : 'white'}}>
+                                    التالي
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
         // ===================== مكون سجل الأعطال =====================
         const CrashLogsTab = () => {
             const [crashes, setCrashes] = React.useState([]);
             const [selectedCrash, setSelectedCrash] = React.useState(null);
             const [selectedDeviceIndex, setSelectedDeviceIndex] = React.useState(0);
             const [selectedUserIndex, setSelectedUserIndex] = React.useState(-1);
+            const [selectedCrashIds, setSelectedCrashIds] = React.useState([]);
             const [searchTerm, setSearchTerm] = React.useState('');
             const [filterStatus, setFilterStatus] = React.useState('all');
             const [filterErrorType, setFilterErrorType] = React.useState('all');
@@ -1243,19 +2272,18 @@ object PageTracker {
 
             // قراءة البيانات الحقيقية من Firebase
             React.useEffect(() => {
-                // التحقق من توفر Firebase
                 if (!db) {
                     console.warn('Firebase not configured');
                     return;
                 }
 
-                // الاستماع إلى تغييرات مجموعة crashes في Firestore
                 const unsubscribe = db.collection('crashes').onSnapshot((snapshot) => {
                     const crashesData = [];
                     snapshot.forEach((doc) => {
                         const data = doc.data();
                         crashesData.push({
-                            id: data.id || parseInt(doc.id),
+                            docId: doc.id,
+                            id: data.id !== undefined ? data.id : doc.id,
                             userId: data.userId || 'Unknown User',
                             errorType: data.errorType || 'Unknown Error',
                             screen: data.screen || 'Unknown Screen',
@@ -1281,16 +2309,13 @@ object PageTracker {
                         });
                     });
                     
-                    // ترتيب البيانات حسب آخر ظهور
                     crashesData.sort((a, b) => new Date(b.lastSeen) - new Date(a.lastSeen));
                     setCrashes(crashesData);
-                    
                 }, (error) => {
                     console.error('❌ خطأ في تحميل بيانات الأعطال:', error);
                     setCrashes([]);
                 });
 
-                // تنظيف الـ listener عند unmount
                 return () => unsubscribe();
             }, []);
 
@@ -1306,7 +2331,7 @@ object PageTracker {
                     c.errorType.toLowerCase().includes(searchTerm.toLowerCase()) ||
                     c.screen.toLowerCase().includes(searchTerm.toLowerCase()) ||
                     c.file.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                    c.id.toString().includes(searchTerm);
+                    (c.id && c.id.toString().includes(searchTerm));
                 const matchStatus = filterStatus === 'all' || c.status === filterStatus;
                 const matchError = filterErrorType === 'all' || c.errorType === filterErrorType;
                 const matchDevice = filterDevice === 'all' || c.devices.includes(filterDevice);
@@ -1330,41 +2355,109 @@ object PageTracker {
                 if (status === 'open') return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', badge: 'from-red-500 to-red-600' };
                 if (status === 'fixed') return { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', badge: 'from-emerald-500 to-emerald-600' };
                 if (status === 'investigating') return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', badge: 'from-amber-500 to-amber-600' };
-                return { bg: 'bg-gray-50', border: 'border-gray-200', text: 'text-gray-700', badge: 'from-gray-500 to-gray-600' };
+                if (status === 'closed') return { bg: 'bg-gray-50', border: 'border-gray-200', text: 'text-gray-700', badge: 'from-gray-500 to-gray-600' };
+                return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', badge: 'from-red-500 to-red-600' };
             };
 
             const getStatusLabel = (status) => {
                 if (status === 'open') return '🔴 مفتوح';
                 if (status === 'fixed') return '✅ مصلح';
                 if (status === 'investigating') return '🔍 قيد التحقيق';
-                return '⚪ مغلق';
+                if (status === 'closed') return '⚪ مغلق';
+                return '🔴 مفتوح';
             };
 
-            // تحديث حالة الخطأ (محلياً وفي Firebase)
-            const updateCrashStatus = (crashId, newStatus) => {
-                // تحديث محلي
-                setCrashes(crashes.map(c => 
-                    c.id === crashId ? {...c, status: newStatus} : c
-                ));
-                if (selectedCrash && selectedCrash.id === crashId) {
-                    setSelectedCrash({...selectedCrash, status: newStatus});
-                }
+            // تحديث حالة الخطأ (محلياً وفي Firebase مباشرة)
+            const updateCrashStatus = (crashKey, newStatus) => {
+                const keyStr = crashKey.toString();
                 
-                // تحديث في Firebase
+                setCrashes(prev => prev.map(c => {
+                    const cKey = (c.docId || c.id).toString();
+                    return cKey === keyStr ? { ...c, status: newStatus } : c;
+                }));
+
+                if (selectedCrash) {
+                    const sKey = (selectedCrash.docId || selectedCrash.id).toString();
+                    if (sKey === keyStr) {
+                        setSelectedCrash(prev => ({ ...prev, status: newStatus }));
+                    }
+                }
+
                 if (db) {
-                    db.collection('crashes').doc(crashId.toString()).update({
+                    db.collection('crashes').doc(keyStr).set({
                         status: newStatus
-                    }).catch(error => {
+                    }, { merge: true }).catch(error => {
                         console.error('❌ خطأ في تحديث الحالة:', error);
                     });
                 }
             };
 
-            // ✅ إعادة تعيين الاختيارات عند تغيير العطل المختار
+            // تحديد / إلغاء تحديد الأعطال
+            const toggleSelectCrash = (crashKey) => {
+                const keyStr = crashKey.toString();
+                setSelectedCrashIds(prev => 
+                    prev.includes(keyStr) ? prev.filter(id => id !== keyStr) : [...prev, keyStr]
+                );
+            };
+
+            const toggleSelectAll = () => {
+                const visibleKeys = paginatedData.map(c => (c.docId || c.id).toString());
+                const allSelected = visibleKeys.length > 0 && visibleKeys.every(k => selectedCrashIds.includes(k));
+                if (allSelected) {
+                    setSelectedCrashIds(prev => prev.filter(id => !visibleKeys.includes(id)));
+                } else {
+                    setSelectedCrashIds(prev => Array.from(new Set([...prev, ...visibleKeys])));
+                }
+            };
+
+            // حذف الأعطال (مفرد أو متعدد)
+            const deleteCrashes = async (crashKeysToDelete) => {
+                if (!crashKeysToDelete || crashKeysToDelete.length === 0) return;
+                
+                const count = crashKeysToDelete.length;
+                const confirmMsg = count === 1 
+                    ? 'هل أنت متأكد من حذف هذا العطل؟' 
+                    : `هل أنت متأكد من حذف الأعطال المحددة (${count})؟`;
+                    
+                if (!window.confirm(confirmMsg)) return;
+
+                const keysStr = crashKeysToDelete.map(k => k.toString());
+
+                // تحديث الواجهة فوراً
+                setCrashes(prev => prev.filter(c => !keysStr.includes((c.docId || c.id).toString())));
+                setSelectedCrashIds(prev => prev.filter(id => !keysStr.includes(id)));
+                
+                if (selectedCrash && keysStr.includes((selectedCrash.docId || selectedCrash.id).toString())) {
+                    setSelectedCrash(null);
+                }
+
+                // الحذف من Firebase
+                if (db) {
+                    try {
+                        const batch = db.batch ? db.batch() : null;
+                        if (batch) {
+                            keysStr.forEach(docId => {
+                                batch.delete(db.collection('crashes').doc(docId));
+                            });
+                            await batch.commit();
+                        } else {
+                            await Promise.all(keysStr.map(docId => 
+                                db.collection('crashes').doc(docId).delete()
+                            ));
+                        }
+                    } catch (err) {
+                        console.error('❌ خطأ في حذف الأعطال من Firebase:', err);
+                        alert('حدث خطأ أثناء الحذف من قاعدة البيانات: ' + err.message);
+                    }
+                }
+            };
+
+            // إعادة تعيين الاختيارات عند تغيير العطل المختار
             React.useEffect(() => {
                 setSelectedDeviceIndex(0);
                 setSelectedUserIndex(-1);
             }, [selectedCrash]);
+
             const getSelectedUserData = () => {
                 if (!selectedCrash) return null;
                 if (selectedUserIndex >= 0 && selectedUserIndex < selectedCrash.affectedUsers.length) {
@@ -1386,11 +2479,9 @@ object PageTracker {
                 };
             };
 
-            // ✅ الحصول على بيانات الجهاز المختار - من المستخدم المختار إن أمكن
             const getSelectedDeviceData = () => {
                 if (!selectedCrash) return null;
                 
-                // إذا تم اختيار مستخدم، احصل على بيانات جهازه الكاملة
                 if (selectedUserIndex >= 0 && selectedUserIndex < selectedCrash.affectedUsers.length) {
                     const user = selectedCrash.affectedUsers[selectedUserIndex];
                     return {
@@ -1405,7 +2496,6 @@ object PageTracker {
                     };
                 }
                 
-                // وإلا، احصل على بيانات الجهاز من القائمة
                 if (selectedDeviceIndex >= 0 && selectedDeviceIndex < selectedCrash.devices.length) {
                     const device = selectedCrash.devices[selectedDeviceIndex];
                     return {
@@ -1434,14 +2524,23 @@ object PageTracker {
 
             const selectedUserData = selectedCrash ? getSelectedUserData() : null;
             const selectedDeviceData = selectedCrash ? getSelectedDeviceData() : null;
+
             if (selectedCrash) {
                 const colors = getStatusColor(selectedCrash.status);
+                const currentCrashKey = (selectedCrash.docId || selectedCrash.id).toString();
                 return (
                     <div className="space-y-6">
-                        <button onClick={() => setSelectedCrash(null)} 
-                            className="flex items-center gap-2 text-purple-600 hover:text-purple-700 font-semibold mb-4">
-                            <i className="fas fa-arrow-right"></i> العودة
-                        </button>
+                        <div className="flex justify-between items-center">
+                            <button onClick={() => setSelectedCrash(null)} 
+                                className="flex items-center gap-2 text-purple-600 hover:text-purple-700 font-semibold mb-4">
+                                <i className="fas fa-arrow-right"></i> العودة
+                            </button>
+                            <button onClick={() => deleteCrashes([currentCrashKey])}
+                                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-md transition mb-4">
+                                <i className="fas fa-trash-alt"></i>
+                                <span>حذف هذا العطل</span>
+                            </button>
+                        </div>
 
                         {/* رأس التفاصيل */}
                         <div className={`${colors.bg} border-2 ${colors.border} rounded-2xl p-6`} style={{backgroundColor: 'var(--bg-card)', borderColor: colors.border}}>
@@ -1453,12 +2552,14 @@ object PageTracker {
                                             <span className={`bg-gradient-to-r ${colors.badge} text-white px-4 py-2 rounded-full font-bold text-sm`}>
                                                 {getStatusLabel(selectedCrash.status)}
                                             </span>
-                                            <select value={selectedCrash.status} onChange={e => updateCrashStatus(selectedCrash.id, e.target.value)}
-                                                className="px-3 py-2 border-2 rounded-full text-sm font-bold focus:outline-none" 
+                                            <select value={selectedCrash.status || 'open'} 
+                                                onChange={e => updateCrashStatus(currentCrashKey, e.target.value)}
+                                                className="px-3 py-2 border-2 rounded-full text-sm font-bold focus:outline-none cursor-pointer" 
                                                 style={{backgroundColor: 'var(--input-bg)', color: 'var(--input-text)', borderColor: 'var(--input-border)'}}>
-                                                <option value="open">مفتوح</option>
-                                                <option value="investigating">قيد التحقيق</option>
-                                                <option value="fixed">مصلح</option>
+                                                <option value="open">🔴 مفتوح</option>
+                                                <option value="investigating">🔍 قيد التحقيق</option>
+                                                <option value="fixed">✅ مصلح</option>
+                                                <option value="closed">⚪ مغلق</option>
                                             </select>
                                         </div>
                                     </div>
@@ -1517,7 +2618,6 @@ object PageTracker {
                                     {selectedCrash.devices.map((device, i) => (
                                         <div key={i} onClick={() => {
                                             setSelectedDeviceIndex(i);
-                                            // ابحث عن أول مستخدم يستخدم هذا الجهاز وحدده تلقائياً
                                             const userIndex = selectedCrash.affectedUsers.findIndex(u => u.device === device);
                                             if (userIndex >= 0) {
                                                 setSelectedUserIndex(userIndex);
@@ -1657,6 +2757,7 @@ object PageTracker {
                                     <option value="open">مفتوح</option>
                                     <option value="investigating">قيد التحقيق</option>
                                     <option value="fixed">مصلح</option>
+                                    <option value="closed">مغلق</option>
                                 </select>
                             </div>
 
@@ -1694,23 +2795,69 @@ object PageTracker {
                         </div>
                     </div>
 
+                    {/* شريط الإجراءات الجماعية عند تحديد أعطال */}
+                    {selectedCrashIds.length > 0 && (
+                        <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-4 flex items-center justify-between animate-fadeIn">
+                            <div className="flex items-center gap-3">
+                                <i className="fas fa-check-square text-red-600 text-xl"></i>
+                                <span className="font-bold text-red-800 text-sm">
+                                    تم تحديد <span className="font-black text-lg">{selectedCrashIds.length}</span> عطل
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button onClick={() => deleteCrashes(selectedCrashIds)}
+                                    className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-md transition">
+                                    <i className="fas fa-trash-alt"></i>
+                                    <span>حذف الأعطال المحددة</span>
+                                </button>
+                                <button onClick={() => setSelectedCrashIds([])}
+                                    className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-xl text-xs font-bold transition">
+                                    إلغاء التحديد
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     {/* الجدول */}
                     <div className="rounded-2xl shadow-lg overflow-hidden" style={{backgroundColor: 'var(--bg-card)'}}>
                         <div className="overflow-x-auto">
                             <table className="w-full">
                                 <thead style={{backgroundColor: 'var(--bg-gray-100)', color: 'var(--text-secondary)'}} className="border-b-2" style={{borderColor: 'var(--border-light)'}}>
                                     <tr>
-                                        {['Crash ID', 'نوع الخطأ', 'الشاشة', 'الملف', 'المتأثرين', 'الإصدار', 'الحالة', 'آخر ظهور'].map(header => (
-                                            <th key={header} className="px-6 py-4 text-right text-sm font-bold whitespace-nowrap">{header}</th>
-                                        ))}
+                                        <th className="px-4 py-4 text-center text-sm font-bold whitespace-nowrap w-12">
+                                            <input type="checkbox"
+                                                checked={paginatedData.length > 0 && paginatedData.every(c => selectedCrashIds.includes((c.docId || c.id).toString()))}
+                                                onChange={toggleSelectAll}
+                                                className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 cursor-pointer"
+                                                title="تحديد الكل"
+                                            />
+                                        </th>
+                                        <th className="px-6 py-4 text-right text-sm font-bold whitespace-nowrap">Crash ID</th>
+                                        <th className="px-6 py-4 text-right text-sm font-bold whitespace-nowrap">نوع الخطأ</th>
+                                        <th className="px-6 py-4 text-right text-sm font-bold whitespace-nowrap">الشاشة</th>
+                                        <th className="px-6 py-4 text-right text-sm font-bold whitespace-nowrap">الملف</th>
+                                        <th className="px-6 py-4 text-right text-sm font-bold whitespace-nowrap">المتأثرين</th>
+                                        <th className="px-6 py-4 text-right text-sm font-bold whitespace-nowrap">الإصدار</th>
+                                        <th className="px-6 py-4 text-right text-sm font-bold whitespace-nowrap">الحالة (حفظ فوري)</th>
+                                        <th className="px-6 py-4 text-right text-sm font-bold whitespace-nowrap">آخر ظهور</th>
+                                        <th className="px-4 py-4 text-center text-sm font-bold whitespace-nowrap">إجراءات</th>
                                     </tr>
                                 </thead>
                                 <tbody style={{borderColor: 'var(--border-light)'}} className="divide-y">
                                     {paginatedData.length > 0 ? paginatedData.map(crash => {
                                         const colors = getStatusColor(crash.status);
+                                        const crashKey = (crash.docId || crash.id).toString();
+                                        const isSelected = selectedCrashIds.includes(crashKey);
                                         return (
-                                            <tr key={crash.id} onClick={() => setSelectedCrash(crash)} 
-                                                className="hover:bg-gray-50 cursor-pointer transition-colors border-l-4" style={{borderColor: 'var(--border-color)'}}>
+                                            <tr key={crashKey} onClick={() => setSelectedCrash(crash)} 
+                                                className={`hover:bg-gray-50 cursor-pointer transition-colors border-l-4 ${isSelected ? 'bg-purple-50/60' : ''}`} style={{borderColor: 'var(--border-color)'}}>
+                                                <td className="px-4 py-4 text-center" onClick={e => e.stopPropagation()}>
+                                                    <input type="checkbox"
+                                                        checked={isSelected}
+                                                        onChange={() => toggleSelectCrash(crashKey)}
+                                                        className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 cursor-pointer"
+                                                    />
+                                                </td>
                                                 <td className="px-6 py-4 font-black text-lg" style={{color: 'var(--text-primary)'}}>#{crash.id}</td>
                                                 <td className="px-6 py-4">
                                                     <span className="px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap" style={{backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#dc2626'}}>{crash.errorType}</span>
@@ -1724,17 +2871,34 @@ object PageTracker {
                                                     </div>
                                                 </td>
                                                 <td className="px-6 py-4 font-semibold" style={{color: '#16a34a'}}>v{crash.appVersion}</td>
-                                                <td className="px-6 py-4 whitespace-nowrap">
-                                                    <span className={`bg-gradient-to-r ${colors.badge} text-white px-3 py-1 rounded-full text-xs font-bold`}>
-                                                        {getStatusLabel(crash.status)}
-                                                    </span>
+                                                <td className="px-6 py-4 whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                                                    <select value={crash.status || 'open'} 
+                                                        onChange={e => updateCrashStatus(crashKey, e.target.value)}
+                                                        className="px-3 py-1.5 border-2 rounded-full text-xs font-bold focus:outline-none transition cursor-pointer shadow-sm"
+                                                        style={{
+                                                            backgroundColor: 'var(--input-bg)',
+                                                            color: 'var(--input-text)',
+                                                            borderColor: colors.border ? colors.border.replace('border-', '') : 'var(--input-border)'
+                                                        }}>
+                                                        <option value="open">🔴 مفتوح</option>
+                                                        <option value="investigating">🔍 قيد التحقيق</option>
+                                                        <option value="fixed">✅ مصلح</option>
+                                                        <option value="closed">⚪ مغلق</option>
+                                                    </select>
                                                 </td>
                                                 <td className="px-6 py-4 text-sm whitespace-nowrap" style={{color: 'var(--text-muted)'}}>{crash.lastSeen}</td>
+                                                <td className="px-4 py-4 text-center whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                                                    <button onClick={() => deleteCrashes([crashKey])}
+                                                        title="حذف العطل"
+                                                        className="p-2 rounded-lg text-red-500 hover:text-red-700 hover:bg-red-100/60 transition">
+                                                        <i className="fas fa-trash-alt text-base"></i>
+                                                    </button>
+                                                </td>
                                             </tr>
                                         );
                                     }) : (
                                         <tr>
-                                            <td colSpan="8" className="px-6 py-12 text-center" style={{color: 'var(--text-muted)'}}>
+                                            <td colSpan="10" className="px-6 py-12 text-center" style={{color: 'var(--text-muted)'}}>
                                                 <i className="fas fa-inbox text-4xl mb-3 block"></i>
                                                 لا توجد نتائج
                                             </td>
@@ -1980,6 +3144,7 @@ object PageTracker {
                                 { id: 'payments', name: 'تتبع الدفع', icon: 'fa-credit-card' },
                                 { id: 'charts', name: 'التحليلات', icon: 'fa-chart-line' },
                                 { id: 'pageactivity', name: 'نشاط المستخدمين', icon: 'fa-map-marked-alt' },
+                                { id: 'appupdates', name: 'إدارة تحديثات التطبيق', icon: 'fa-sync-alt' },
                                 { id: 'crashlogs', name: 'سجل الأعطال', icon: 'fa-bug' },
                                 { id: 'integration', name: 'دليل التكامل', icon: 'fa-rocket' }
                             ].map(tab => (
@@ -2238,6 +3403,11 @@ object PageTracker {
                         {/* ===== نشاط المستخدمين ===== */}
                         {activeTab === 'pageactivity' && (
                             <PageActivityTab allUsers={dbData?.rawUsers || []} db={db} realPageViews={dbData?.pageViews} />
+                        )}
+
+                        {/* ===== إدارة تحديثات التطبيق ===== */}
+                        {activeTab === 'appupdates' && (
+                            <AppUpdatesTab rawUsers={dbData?.rawUsers || []} db={db} />
                         )}
 
                         {/* ===== سجل الأعطال ===== */}
