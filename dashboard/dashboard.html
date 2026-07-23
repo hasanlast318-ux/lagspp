@@ -1757,11 +1757,13 @@ object PageTracker {
                         selectedVersions,
                         minVersion,
                         maxVersion,
+                        targetPlatform: 'mobile',
+                        targetDevice: 'mobile',
                         isActive: overrideData.isActive !== undefined ? overrideData.isActive : isActive,
                         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     };
                     await db.collection('appUpdates').doc('settings').set(configData);
-                    alert('تم حفظ إعدادات التحديث بنجاح!');
+                    alert('تم حفظ إعدادات التحديث بنجاح (مخصصة لهواتف المستخدمين فقط)!');
                 } catch (err) {
                     console.error("Error saving settings:", err);
                     alert('خطأ أثناء حفظ الإعدادات: ' + err.message);
@@ -1788,7 +1790,7 @@ object PageTracker {
                     return;
                 }
 
-                if (!confirm(`هل أنت متأكد من إرسال إشعار التحديث لـ ${targetedUsers.length} مستخدم مستهدف؟`)) {
+                if (!confirm(`هل أنت متأكد من إرسال إشعار التحديث لـ ${targetedUsers.length} مستخدم مستهدف على الهواتف؟`)) {
                     return;
                 }
 
@@ -1804,6 +1806,8 @@ object PageTracker {
                         selectedVersions,
                         minVersion,
                         maxVersion,
+                        targetPlatform: 'mobile',
+                        targetDevice: 'mobile',
                         isActive: true,
                         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     };
@@ -1824,6 +1828,9 @@ object PageTracker {
                         body: message,
                         link: 'custom_path',
                         customLink: updateUrl,
+                        targetPlatform: 'mobile',
+                        targetDevice: 'mobile',
+                        isAppUpdate: true,
                         status: 'pending',
                         createdAt: Date.now(),
                         createdBy: auth()?.currentUser?.email || 'System (App Update)',
@@ -1831,7 +1838,7 @@ object PageTracker {
                         recipients: recipients
                     });
 
-                    alert(`تم حفظ التحديث وجدولة إرسال الإشعار لـ ${recipients.length} مستخدم بنجاح!`);
+                    alert(`تم حفظ التحديث وجدولة إرسال الإشعار لـ ${recipients.length} مستخدم على الهواتف بنجاح!`);
                 } catch (err) {
                     console.error("Error sending update notification:", err);
                     alert('خطأ في إرسال الإشعار: ' + err.message);
@@ -2130,8 +2137,8 @@ object PageTracker {
                             </div>
 
                             <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 leading-relaxed" style={{backgroundColor: 'rgba(245,158,11,0.05)', borderColor: 'rgba(245,158,11,0.2)'}}>
-                                <i className="fas fa-exclamation-triangle ml-1"></i>
-                                <strong>تنويه:</strong> عند حفظ التحديث كـ <strong>"إلزامي"</strong>، سيمنع التطبيق أي مستخدم يستعمل إصداراً قديماً من استخدام التطبيق فوراً حتى يقوم بالتحديث من الرابط المحدد.
+                                <i className="fas fa-mobile-alt ml-1 text-indigo-600"></i>
+                                <strong>تنويه هام:</strong> التحديثات والتوقف الإلزامي مخصصة <strong>لتطبيقات الهاتف المحمول (Android/iOS) فقط</strong> وسوف توقف تطبيق الهاتف للمستخدمين حتى يقوموا بالتحديث، ولن توقف أو تؤثر إطلاقاً على موقع الدعم الإلكتروني.
                             </div>
                         </div>
                     </div>
