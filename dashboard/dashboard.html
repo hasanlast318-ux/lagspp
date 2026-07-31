@@ -2275,6 +2275,7 @@ object PageTracker {
             const [sortBy, setSortBy] = React.useState('lastSeen');
             const [currentPage, setCurrentPage] = React.useState(1);
             const [editingStatus, setEditingStatus] = React.useState(null);
+            const [copiedError, setCopiedError] = React.useState(false);
             const itemsPerPage = 10;
 
             // قراءة البيانات الحقيقية من Firebase
@@ -2532,6 +2533,47 @@ object PageTracker {
             const selectedUserData = selectedCrash ? getSelectedUserData() : null;
             const selectedDeviceData = selectedCrash ? getSelectedDeviceData() : null;
 
+            const copyCrashDetails = (crash) => {
+                if (!crash) return;
+                const textToCopy = ` بيانات الخطأ
+Crash #${crash.id}
+نوع الخطأ: ${crash.errorType}
+الملف: ${crash.file}
+رقم السطر: ${crash.line}
+الشاشة: ${crash.screen}`;
+
+                const setSuccess = () => {
+                    setCopiedError(true);
+                    setTimeout(() => setCopiedError(false), 2000);
+                };
+
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(textToCopy).then(setSuccess).catch(err => {
+                        console.error('Clipboard writeText error:', err);
+                        fallbackCopy(textToCopy, setSuccess);
+                    });
+                } else {
+                    fallbackCopy(textToCopy, setSuccess);
+                }
+            };
+
+            const fallbackCopy = (text, cb) => {
+                const textArea = document.createElement("textarea");
+                textArea.value = text;
+                textArea.style.position = "fixed";
+                textArea.style.left = "-9999px";
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                    if (cb) cb();
+                } catch (e) {
+                    console.error('Fallback copy error:', e);
+                }
+                document.body.removeChild(textArea);
+            };
+
             if (selectedCrash) {
                 const colors = getStatusColor(selectedCrash.status);
                 const currentCrashKey = (selectedCrash.docId || selectedCrash.id).toString();
@@ -2542,11 +2584,18 @@ object PageTracker {
                                 className="flex items-center gap-2 text-purple-600 hover:text-purple-700 font-semibold mb-4">
                                 <i className="fas fa-arrow-right"></i> العودة
                             </button>
-                            <button onClick={() => deleteCrashes([currentCrashKey])}
-                                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-md transition mb-4">
-                                <i className="fas fa-trash-alt"></i>
-                                <span>حذف هذا العطل</span>
-                            </button>
+                            <div className="flex items-center gap-2 mb-4">
+                                <button onClick={() => copyCrashDetails(selectedCrash)}
+                                    className={`${copiedError ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-blue-600 hover:bg-blue-700'} text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-md transition-all duration-200`}>
+                                    <i className={`fas ${copiedError ? 'fa-check' : 'fa-copy'}`}></i>
+                                    <span>{copiedError ? 'تم نسخ الخطأ!' : 'نسخ الخطأ'}</span>
+                                </button>
+                                <button onClick={() => deleteCrashes([currentCrashKey])}
+                                    className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-md transition">
+                                    <i className="fas fa-trash-alt"></i>
+                                    <span>حذف هذا العطل</span>
+                                </button>
+                            </div>
                         </div>
 
                         {/* رأس التفاصيل */}
@@ -2582,7 +2631,15 @@ object PageTracker {
                         {/* البيانات الأساسية */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             <div className="rounded-2xl shadow-lg p-6 border-2" style={{backgroundColor: 'var(--bg-card)', borderColor: '#dbeafe'}}>
-                                <h3 className="font-bold text-sm mb-3" style={{color: 'var(--text-secondary)'}}>📊 بيانات الخطأ</h3>
+                                <div className="flex justify-between items-center mb-3">
+                                    <h3 className="font-bold text-sm" style={{color: 'var(--text-secondary)'}}>📊 بيانات الخطأ</h3>
+                                    <button onClick={() => copyCrashDetails(selectedCrash)}
+                                        className={`text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all shadow-sm ${copiedError ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}
+                                        title="نسخ بيانات الخطأ">
+                                        <i className={`fas ${copiedError ? 'fa-check' : 'fa-copy'}`}></i>
+                                        <span>{copiedError ? 'تم النسخ!' : 'نسخ الخطأ'}</span>
+                                    </button>
+                                </div>
                                 <div className="space-y-2 text-sm">
                                     <div><span style={{color: 'var(--text-muted)'}}>نوع الخطأ:</span> <span className="font-bold" style={{color: 'var(--text-primary)'}}>{selectedCrash.errorType}</span></div>
                                     <div><span style={{color: 'var(--text-muted)'}}>الملف:</span> <span className="font-mono text-xs" style={{color: '#a78bfa'}}>{selectedCrash.file}</span></div>
