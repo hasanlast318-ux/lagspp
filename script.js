@@ -17,12 +17,31 @@ const onSnapshot = (...args) => window.onSnapshot(...args);
 const getDocs = (...args) => window.getDocs(...args);
 const functions = () => window.functions;
 const httpsCallable = (...args) => window.httpsCallable(...args);
+const callCloudFunction = async (name, data) => {
+    if (!functions()) {
+        throw new Error('Firebase Functions غير مهيأة');
+    }
+
+    const callable = httpsCallable(functions(), name);
+    const result = await callable(data);
+    return result.data;
+};
+const DASHBOARD_BUILD = '7.16-admin-functions-20260813';
+console.info(`[LangHub Support] Loaded dashboard build ${DASHBOARD_BUILD}`);
+
+function formatCallableError(error) {
+    const code = error?.code || 'unknown';
+    const message = error?.message || 'لا توجد رسالة خطأ من الخادم';
+    const details = error?.details ? `\nالتفاصيل: ${JSON.stringify(error.details)}` : '';
+    return `رمز الخطأ: ${code}\nالرسالة: ${message}${details}`;
+}
 const COLLECTION_NAME = "reports";
 const USERS_COLLECTION_NAME = "users";
 const GUEST_USERS_COLLECTION_NAME = "guestUsers";
 const NOTIFICATION_REQUESTS_COLLECTION = "notificationRequests";
 const USER_DELETION_REQUESTS_COLLECTION = "userDeletionRequests";
 const GAS_URL = "https://script.google.com/macros/s/AKfycbzPymoY-eLQdGfkxvX_BeDYRma4gBM8murSh3cEsT_z9CDOkBHXuxdz_8xALzAxzA3FtA/exec";
+const CURRENT_APP_VERSION = "7.15";
 const MAX_ATTACHMENT_SIZE = 50 * 1024 * 1024;
 const PRESENCE_REFRESH_INTERVAL = 5000;
 const ONLINE_HEARTBEAT_TIMEOUT = 15000;
@@ -365,11 +384,20 @@ function checkAuthState() {
             loginContainer.style.display = 'none';
             appContainer.style.display = 'flex';
             init();
+
+            // Register user version in Firestore
+            registerAppVersion(user);
+
+            // Start listening to update configurations
+            startUpdateChecking(user);
         } else {
             console.log('❌ لم يقم بتسجيل الدخول');
             loginContainer.style.display = 'flex';
             appContainer.style.display = 'none';
             resetLoginForm();
+
+            // Start updates checking anonymously
+            startUpdateChecking(null);
             
             // Reset mobile top bar and close drawer on logout
             const mobileTopBar = document.getElementById('mobileTopBar');
@@ -2092,14 +2120,31 @@ function sendDataToDashboard() {
             });
             return obj;
         });
+
+        // تحويل بيانات مشاهدات الشاشات (pageViews) لشكل قابل للإرسال
+        const pageViewsSerialized = (pageViewsData || []).map(pv => {
+            const obj = {};
+            Object.keys(pv).forEach(k => {
+                const v = pv[k];
+                if (v && typeof v === 'object' && typeof v.toMillis === 'function') {
+                    obj[k] = { _type: 'timestamp', millis: v.toMillis() };
+                } else if (v && typeof v === 'object' && v.seconds !== undefined && v.nanoseconds !== undefined) {
+                    obj[k] = { _type: 'timestamp', millis: v.seconds * 1000 };
+                } else if (typeof v !== 'function') {
+                    obj[k] = v;
+                }
+            });
+            return obj;
+        });
         
         iframe.contentWindow.postMessage({
             type: 'FIREBASE_DATA',
             users: appUsersData,
-            reports: usersData
+            reports: usersData,
+            pageViews: pageViewsSerialized
         }, '*');
         
-        console.log('📤 تم إرسال البيانات للوحة الإحصائيات:', appUsersData.length, 'مستخدم،', usersData.length, 'تقرير');
+        console.log('📤 تم إرسال البيانات للوحة الإحصائيات:', appUsersData.length, 'مستخدم،', usersData.length, 'تقرير،', pageViewsSerialized.length, 'مشاهدات صفحة');
     } catch (err) {
         console.warn('تعذر إرسال البيانات للـ iframe:', err);
     }
@@ -2851,9 +2896,11 @@ function renderGuestUsers() {
         const appVersion = getAppVersion(user);
         const lastSeenAt = getGuestLastSeenAt(user);
         const checked = selectedGuestUserIds.has(key);
+        const isActive = selectedGuestUserId === key;
+        const detailsHtml = isActive ? getGuestDetailsHtml(user) : '';
 
         return `
-            <div class="user-row-new guest-row-new ${selectedGuestUserId === key ? 'active' : ''}" data-guest-key="${escapeAttribute(key)}">
+            <div class="user-row-new guest-row-new ${isActive ? 'active' : ''}" data-guest-key="${escapeAttribute(key)}">
                 <label class="user-row-check-new">
                     <input type="checkbox" class="guest-user-checkbox" data-guest-key="${escapeAttribute(key)}" ${checked ? 'checked' : ''}>
                 </label>
@@ -2870,6 +2917,11 @@ function renderGuestUsers() {
                 <div class="usage-pill-new" data-label="الإصدار">${escapeHtml(appVersion || 'غير متوفر')}</div>
                 <div class="usage-pill-new" data-label="آخر استخدام" title="${lastSeenAt ? escapeHtml(new Date(lastSeenAt).toLocaleString('ar-SA')) : ''}">${lastSeenAt ? formatInactiveSince(lastSeenAt) : 'غير متوفر'}</div>
                 <div class="user-status-pill-new ${presence.className} status-tooltip-target" data-label="الحالة" data-full-status="${escapeAttribute(presence.text)}" aria-label="${escapeAttribute(presence.text)}">${escapeHtml(presence.text)}</div>
+                
+                <!-- Expanded details container -->
+                <div class="user-row-details-wrapper">
+                    <div class="user-row-details-content">${detailsHtml}</div>
+                </div>
             </div>
         `;
     }).join('');
@@ -2903,8 +2955,41 @@ function renderGuestUsers() {
 
     document.querySelectorAll('.guest-row-new').forEach(row => {
         row.addEventListener('click', () => {
-            selectedGuestUserId = row.dataset.guestKey || null;
-            renderGuestUsers();
+            const guestKey = row.dataset.guestKey;
+            const content = row.querySelector('.user-row-details-content');
+            
+            if (row.classList.contains('active')) {
+                row.classList.remove('active');
+                selectedGuestUserId = null;
+                setTimeout(() => {
+                    if (!row.classList.contains('active')) {
+                        content.innerHTML = '';
+                    }
+                }, 300);
+            } else {
+                // Collapse other active rows
+                document.querySelectorAll('.guest-row-new.active').forEach(activeRow => {
+                    activeRow.classList.remove('active');
+                    const activeContent = activeRow.querySelector('.user-row-details-content');
+                    setTimeout(() => {
+                        if (!activeRow.classList.contains('active')) {
+                            activeContent.innerHTML = '';
+                        }
+                    }, 300);
+                });
+
+                selectedGuestUserId = guestKey;
+                
+                const user = guests.find(g => getGuestKey(g) === guestKey);
+                if (user) {
+                    content.innerHTML = getGuestDetailsHtml(user);
+                }
+                
+                void row.offsetHeight;
+                row.classList.add('active');
+            }
+            
+            renderGuestDetails();
         });
     });
 
@@ -3681,6 +3766,143 @@ function updateNotificationSelectionUI(users = null) {
     }
 }
 
+function getUserDetailsHtml(user) {
+    const usage = getUsageStats(user);
+    const tokens = getFcmTokens(user);
+    const appVersion = getAppVersion(user);
+    const lastActivityAt = getLastActivityAt(user);
+    const screenDimensions = getScreenDimensions(user);
+    const screenSize = getScreenSizeInInches(user);
+    const screenDPI = getScreenDPI(user);
+    const screenDP = getScreenDP(user);
+    const screenDensity = getScreenDensity(user);
+    const androidVersion = getAndroidVersion(user);
+    
+    const actualScreenResolution = user.screenResolution || user.screen_resolution || screenDimensions;
+    const actualScreenInches = user.screenInches || user.screen_inches || screenSize;
+    const actualScreenDPI = user.screenDPI || user.screen_dpi || screenDPI;
+    const actualScreenDP = user.screenDP || user.screen_dp || screenDP;
+    const actualScreenDensity = user.screenDensity || user.screen_density || screenDensity;
+    const actualAndroidVersion = user.androidVersion || user.android_version || androidVersion;
+
+    const detailRows = [
+        ['معرف المستخدم', user.userId || user.uid],
+        ['رقم آخر بلاغ', user.reportId],
+        ['الجهاز', user.device],
+        ['الصفحة الحالية', getUserLocationText(user)],
+        ['إصدار الأندرويد', actualAndroidVersion],
+        ['إصدار التطبيق', appVersion],
+        ['ابعاد الشاشة (بكسل)', actualScreenResolution],
+        ['حجم الشاشة', actualScreenInches],
+        ['كثافة البكسل DPI', actualScreenDPI],
+        ['وحدات DP', actualScreenDP],
+        ['فئة الكثافة', actualScreenDensity],
+        ['آخر استخدام', lastActivityAt ? `${formatInactiveSince(lastActivityAt)} - ${new Date(lastActivityAt).toLocaleString('ar-SA')}` : 'غير متوفر'],
+        ['رموز FCM', tokens.length ? `${tokens.length} محفوظ` : 'غير متوفر']
+    ].filter(([, value]) => value);
+
+    return `
+        <div class="inline-user-details" onclick="event.stopPropagation();">
+            <div class="inline-user-head">
+                <div class="inline-user-profile">
+                    <div class="inline-user-avatar">${renderUserAvatar(user, getDisplayName(user))}</div>
+                    <div class="inline-user-title">
+                        <h4>${escapeHtml(getDisplayName(user))}</h4>
+                        <p>${escapeHtml(getUserEmail(user) || getUserKey(user))}</p>
+                    </div>
+                </div>
+                <button type="button" class="inline-edit-name-btn" data-edit-user-key="${escapeAttribute(getUserKey(user))}">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+                    </svg>
+                    تعديل الاسم
+                </button>
+            </div>
+            
+            <div class="inline-user-usage">
+                <div class="usage-stat-card">
+                    <span class="usage-value">${formatUsage(usage.daily)}</span>
+                    <span class="usage-label">متوسط يومي</span>
+                </div>
+                <div class="usage-stat-card">
+                    <span class="usage-value">${formatUsage(usage.weekly)}</span>
+                    <span class="usage-label">متوسط أسبوعي</span>
+                </div>
+                <div class="usage-stat-card">
+                    <span class="usage-value">${formatUsage(usage.monthly)}</span>
+                    <span class="usage-label">متوسط شهري</span>
+                </div>
+            </div>
+
+            <div class="inline-user-grid">
+                ${detailRows.map(([label, value]) => `
+                    <div class="inline-grid-item">
+                        <span class="grid-item-label">${escapeHtml(label)}</span>
+                        <strong class="grid-item-value">${escapeHtml(String(value))}</strong>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function getGuestDetailsHtml(user) {
+    const usage = getUsageStats(user);
+    const presence = getGuestPresenceState(user);
+    const lastSeenAt = getGuestLastSeenAt(user);
+    const firstSeenAt = getGuestFirstSeenAt(user);
+    const key = getGuestKey(user);
+    const appVersion = getAppVersion(user);
+
+    const detailRows = [
+        ['معرف الضيف', key],
+        ['Anonymous UID', user.anonymousUid || key],
+        ['إصدار التطبيق', appVersion || 'غير متوفر'],
+        ['الحالة', presence.text],
+        ['آخر استخدام', lastSeenAt ? `${formatInactiveSince(lastSeenAt)} - ${new Date(lastSeenAt).toLocaleString('ar-SA')}` : 'غير متوفر'],
+        ['أول ظهور', firstSeenAt ? new Date(firstSeenAt).toLocaleString('ar-SA') : 'غير متوفر']
+    ].filter(([, value]) => value);
+
+    return `
+        <div class="inline-user-details inline-guest-details" onclick="event.stopPropagation();">
+            <div class="inline-user-head">
+                <div class="inline-user-profile">
+                    <div class="inline-user-avatar guest-avatar-new">${renderUserAvatar(user, 'ض')}</div>
+                    <div class="inline-user-title">
+                        <h4>${escapeHtml(getGuestDisplayName(user))}</h4>
+                        <p>${escapeHtml(getGuestSubtitle(user))}</p>
+                    </div>
+                </div>
+                <span class="inline-guest-badge">حساب ضيف</span>
+            </div>
+            
+            <div class="inline-user-usage">
+                <div class="usage-stat-card">
+                    <span class="usage-value">${formatUsage(usage.daily)}</span>
+                    <span class="usage-label">متوسط يومي</span>
+                </div>
+                <div class="usage-stat-card">
+                    <span class="usage-value">${formatUsage(usage.weekly)}</span>
+                    <span class="usage-label">متوسط أسبوعي</span>
+                </div>
+                <div class="usage-stat-card">
+                    <span class="usage-value">${formatUsage(usage.monthly)}</span>
+                    <span class="usage-label">متوسط شهري</span>
+                </div>
+            </div>
+
+            <div class="inline-user-grid">
+                ${detailRows.map(([label, value]) => `
+                    <div class="inline-grid-item">
+                        <span class="grid-item-label">${escapeHtml(label)}</span>
+                        <strong class="grid-item-value">${escapeHtml(String(value))}</strong>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
 function renderNotificationUsers() {
     if (!usersTableList) return;
 
@@ -3703,9 +3925,11 @@ function renderNotificationUsers() {
         const lastActivityAt = getLastActivityAt(user);
         const checked = selectedNotificationUserIds.has(key);
         const tokensCount = getFcmTokens(user).length;
+        const isActive = selectedNotificationUserId === key;
+        const detailsHtml = isActive ? getUserDetailsHtml(user) : '';
 
         return `
-            <div class="user-row-new ${selectedNotificationUserId === key ? 'active' : ''}" data-user-key="${escapeAttribute(key)}">
+            <div class="user-row-new ${isActive ? 'active' : ''}" data-user-key="${escapeAttribute(key)}">
                 <label class="user-row-check-new">
                     <input type="checkbox" class="notification-user-checkbox" data-user-key="${escapeAttribute(key)}" ${checked ? 'checked' : ''}>
                 </label>
@@ -3722,6 +3946,11 @@ function renderNotificationUsers() {
                 <div class="usage-pill-new" data-label="الإصدار">${escapeHtml(appVersion || 'غير متوفر')}</div>
                 <div class="usage-pill-new" data-label="آخر استخدام" title="${lastActivityAt ? escapeHtml(new Date(lastActivityAt).toLocaleString('ar-SA')) : ''}">${formatInactiveSince(lastActivityAt)}</div>
                 <div class="user-status-pill-new ${presence.className} status-tooltip-target" data-label="الحالة" data-full-status="${escapeAttribute(presence.text)}" aria-label="${escapeAttribute(presence.text)}">${escapeHtml(presence.text)}</div>
+                
+                <!-- Expanded details container -->
+                <div class="user-row-details-wrapper">
+                    <div class="user-row-details-content">${detailsHtml}</div>
+                </div>
             </div>
         `;
     }).join('');
@@ -3755,11 +3984,65 @@ function renderNotificationUsers() {
 
     document.querySelectorAll('.user-row-new').forEach(row => {
         row.addEventListener('click', () => {
-            selectedNotificationUserId = row.dataset.userKey;
-            renderNotificationUsers();
+            const userKey = row.dataset.userKey;
+            const content = row.querySelector('.user-row-details-content');
+            
+            if (row.classList.contains('active')) {
+                row.classList.remove('active');
+                selectedNotificationUserId = null;
+                setTimeout(() => {
+                    if (!row.classList.contains('active')) {
+                        content.innerHTML = '';
+                    }
+                }, 300);
+            } else {
+                // Collapse other active rows
+                document.querySelectorAll('.user-row-new.active').forEach(activeRow => {
+                    activeRow.classList.remove('active');
+                    const activeContent = activeRow.querySelector('.user-row-details-content');
+                    setTimeout(() => {
+                        if (!activeRow.classList.contains('active')) {
+                            activeContent.innerHTML = '';
+                        }
+                    }, 300);
+                });
+
+                selectedNotificationUserId = userKey;
+                
+                const user = users.find(u => getUserKey(u) === userKey);
+                if (user) {
+                    content.innerHTML = getUserDetailsHtml(user);
+                    
+                    const inlineEditBtn = content.querySelector('.inline-edit-name-btn');
+                    if (inlineEditBtn) {
+                        inlineEditBtn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            editUserName(userKey);
+                        });
+                    }
+                }
+                
+                void row.offsetHeight;
+                row.classList.add('active');
+            }
+            
             renderSelectedUserDetails();
         });
     });
+
+    // Bind inline edit name button for the pre-populated active row (if any)
+    if (selectedNotificationUserId) {
+        const activeRow = document.querySelector(`.user-row-new[data-user-key="${escapeAttribute(selectedNotificationUserId)}"]`);
+        if (activeRow) {
+            const inlineEditBtn = activeRow.querySelector('.inline-edit-name-btn');
+            if (inlineEditBtn) {
+                inlineEditBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    editUserName(selectedNotificationUserId);
+                });
+            }
+        }
+    }
 }
 
 function renderSelectedUserDetails() {
@@ -3853,54 +4136,55 @@ async function editUserName(userKey) {
 
     const currentName = getDisplayName(user);
     const newName = prompt('اكتب اسم المستخدم الجديد:', currentName);
+
     if (newName === null) return;
 
     const cleanName = newName.trim();
-    if (!cleanName) {
-        showToast('لا يمكن ترك الاسم فارغاً', true);
+
+    if (!cleanName || cleanName.length > 100) {
+        showToast('اسم المستخدم يجب أن يكون بين 1 و100 حرف', true);
         return;
     }
 
+    const userId = getUserKey(user);
+
     try {
-        const { reports, appUser } = findUsersByKey(userKey);
-        const updates = [];
-
-        if (appUser?.id) {
-            updates.push(updateDoc(doc(db(), USERS_COLLECTION_NAME, appUser.id), {
-                userName: cleanName,
-                displayName: cleanName,
-                nameUpdatedAt: Date.now()
-            }));
-        }
-
-        reports.forEach(report => {
-            updates.push(updateDoc(doc(db(), COLLECTION_NAME, report.id), {
-                userName: cleanName,
-                displayName: cleanName,
-                nameUpdatedAt: Date.now()
-            }));
+        await callCloudFunction('updateSupportUserName', {
+            userId,
+            userName: cleanName
         });
 
-        await Promise.all(updates);
+        appUsers = appUsers.map(item =>
+            getUserKey(item) === userKey
+                ? { ...item, userName: cleanName, displayName: cleanName }
+                : item
+        );
 
-        appUsers = appUsers.map(item => getUserKey(item) === userKey ? { ...item, userName: cleanName, displayName: cleanName } : item);
-        allUsers = allUsers.map(item => getUserKey(item) === userKey ? { ...item, userName: cleanName, displayName: cleanName } : item);
+        allUsers = allUsers.map(item =>
+            getUserKey(item) === userKey
+                ? { ...item, userName: cleanName, displayName: cleanName }
+                : item
+        );
 
         if (selectedUserId) {
             const selected = allUsers.find(item => item.id === selectedUserId);
+
             if (selected && getUserKey(selected) === userKey) {
                 const userNameElem = document.getElementById('userName');
-                if (userNameElem) userNameElem.textContent = cleanName;
+                if (userNameElem) {
+                    userNameElem.textContent = cleanName;
+                }
             }
         }
 
         renderNotificationUsers();
         renderSelectedUserDetails();
         renderUsersList();
-        showToast('تم تحديث اسم المستخدم');
+
+        showToast('تم تحديث اسم المستخدم بنجاح');
     } catch (error) {
-        console.error('خطأ في تعديل اسم المستخدم:', error);
-        showToast('فشل تعديل اسم المستخدم', true);
+        console.error('خطأ في تحديث اسم المستخدم:', error);
+        showToast('فشل تحديث اسم المستخدم', true);
     }
 }
 
@@ -4583,8 +4867,15 @@ async function deleteChatAttachments(user) {
 
 async function deleteChatById(userId) {
     const user = allUsers.find(item => item.id === userId);
-    if (user) await deleteChatAttachments(user);
-    await deleteDoc(doc(db(), COLLECTION_NAME, userId));
+    if (!user) {
+        throw new Error('المحادثة غير موجودة');
+    }
+
+    const reportId = user.reportId || user.id;
+
+    await callCloudFunction('deleteSupportConversation', {
+        reportId
+    });
 }
 
 function clearCurrentChatView() {
@@ -4629,7 +4920,9 @@ async function deleteCurrentChat() {
         showToast('تم حذف الدردشة بالكامل');
     } catch (error) {
         console.error('خطأ في حذف الدردشة:', error);
-        showToast('فشل حذف الدردشة', true);
+        const details = formatCallableError(error);
+        showToast(`فشل حذف الدردشة (${error?.code || 'unknown'})`, true);
+        alert(`تعذر حذف المحادثة.\n\n${details}`);
     } finally {
         if (deleteChatBtn) deleteChatBtn.disabled = false;
     }
@@ -4659,7 +4952,9 @@ async function deleteSelectedChats() {
         showToast(`تم حذف ${ids.length} محادثة`);
     } catch (error) {
         console.error('خطأ في حذف المحادثات المحددة:', error);
-        showToast('فشل حذف بعض المحادثات المحددة', true);
+        const details = formatCallableError(error);
+        showToast(`فشل حذف المحادثات (${error?.code || 'unknown'})`, true);
+        alert(`تعذر حذف بعض المحادثات.\n\n${details}`);
     } finally {
         updateBulkActionsUI();
     }
@@ -5871,6 +6166,152 @@ window.selectAndApplyShortcut = selectAndApplyShortcut;
 window.closeShortcutForm = closeShortcutForm;
 window.openSettings = openSettings;
 window.setSettingsPanel = setSettingsPanel;
+
+// ========== نظام إدارة تحديثات التطبيق (App Updates System) ==========
+let updateSettingsListener = null;
+
+async function registerAppVersion(user) {
+    if (!user) return;
+    try {
+        const userRef = doc(db(), USERS_COLLECTION_NAME, user.uid);
+        await updateDoc(userRef, {
+            appVersion: CURRENT_APP_VERSION,
+            lastActive: Date.now()
+        });
+        console.log(`✅ [App Version] Registered version ${CURRENT_APP_VERSION} for user ${user.uid}`);
+    } catch (error) {
+        console.warn('⚠️ [App Version] Failed to update appVersion in users collection:', error);
+    }
+}
+
+function compareVersions(v1, v2) {
+    const parts1 = String(v1).replace(/[^0-9.]/g, '').split('.').map(Number);
+    const parts2 = String(v2).replace(/[^0-9.]/g, '').split('.').map(Number);
+    const maxLen = Math.max(parts1.length, parts2.length);
+    for (let i = 0; i < maxLen; i++) {
+        const p1 = parts1[i] || 0;
+        const p2 = parts2[i] || 0;
+        if (p1 < p2) return -1;
+        if (p1 > p2) return 1;
+    }
+    return 0;
+}
+
+function startUpdateChecking(user) {
+    if (updateSettingsListener) {
+        updateSettingsListener();
+        updateSettingsListener = null;
+    }
+
+    try {
+        const settingsRef = doc(db(), "appUpdates", "settings");
+        updateSettingsListener = onSnapshot(settingsRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                evaluateUpdateSettings(data, user);
+            }
+        }, (err) => {
+            console.error("Error listening to updates configuration:", err);
+        });
+    } catch (error) {
+        console.warn("Could not start updates checker listener:", error);
+    }
+}
+
+function evaluateUpdateSettings(data, user) {
+    if (!data || !data.isActive) {
+        closeUpdateModal();
+        return;
+    }
+
+    // التحديثات والتوقف الإلزامي مخصصة لتطبيقات الهاتف المحمول (Android / iOS)
+    // موقع الدعم وإدارته يعمل عبر الويب ولا يجب قفله أو إظهار نبتذة التحديث عليه
+    const targetPlatform = data.targetPlatform || 'mobile';
+    if (targetPlatform === 'mobile' || data.targetDevice === 'mobile' || targetPlatform !== 'web') {
+        closeUpdateModal();
+        return;
+    }
+
+    const userVersion = CURRENT_APP_VERSION;
+    let isTargeted = false;
+    const targetingType = data.targetingType || 'all';
+
+    if (targetingType === 'all') {
+        isTargeted = true;
+    } else if (targetingType === 'specific') {
+        const selectedVersions = data.selectedVersions || [];
+        isTargeted = selectedVersions.includes(userVersion);
+    } else if (targetingType === 'below') {
+        isTargeted = data.minVersion ? compareVersions(userVersion, data.minVersion) < 0 : false;
+    } else if (targetingType === 'above') {
+        isTargeted = data.maxVersion ? compareVersions(userVersion, data.maxVersion) > 0 : false;
+    } else if (targetingType === 'range') {
+        const matchMin = data.minVersion ? compareVersions(userVersion, data.minVersion) >= 0 : true;
+        const matchMax = data.maxVersion ? compareVersions(userVersion, data.maxVersion) <= 0 : true;
+        isTargeted = matchMin && matchMax;
+    }
+
+    if (isTargeted) {
+        showUpdateModal(data);
+    } else {
+        closeUpdateModal();
+    }
+}
+
+function showUpdateModal(data) {
+    const modal = document.getElementById('updateModal');
+    const titleEl = document.getElementById('updateModalTitle');
+    const msgEl = document.getElementById('updateModalMessage');
+    const linkEl = document.getElementById('updateModalLink');
+    const closeBtn = document.getElementById('updateModalCloseBtn');
+
+    if (!modal) return;
+
+    if (titleEl) titleEl.textContent = data.title || 'تحديث جديد متوفر';
+    if (msgEl) msgEl.textContent = data.message || '';
+    if (linkEl) {
+        linkEl.href = data.updateUrl || '#';
+        linkEl.style.display = data.updateUrl ? 'flex' : 'none';
+    }
+
+    if (data.isMandatory) {
+        // Hide close button
+        if (closeBtn) closeBtn.style.display = 'none';
+        
+        // Prevent closing by clicking outside
+        modal.onclick = null;
+        modal.style.pointerEvents = 'auto';
+        
+        // Prevent closing with Esc key
+        window.addEventListener('keydown', preventEscapeClose);
+    } else {
+        if (closeBtn) {
+            closeBtn.style.display = 'flex';
+            // Click handler to close
+            closeBtn.onclick = () => closeUpdateModal();
+        }
+        modal.onclick = (e) => {
+            if (e.target === modal) closeUpdateModal();
+        };
+    }
+
+    modal.style.display = 'flex';
+}
+
+function preventEscapeClose(e) {
+    if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+}
+
+function closeUpdateModal() {
+    const modal = document.getElementById('updateModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    window.removeEventListener('keydown', preventEscapeClose);
+}
 
 if (document.readyState === 'loading') {
     window.addEventListener('DOMContentLoaded', initApp);
