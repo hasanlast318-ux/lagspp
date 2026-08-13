@@ -9,7 +9,7 @@
     <title>نظام إدارة الدعم المتكامل - Expert Dashboard</title>
     <script>
         (function () {
-            const BUILD = '7.15-notification-live-20260612';
+              const BUILD = '7.16-admin-functions-20260813';
             const KEY = 'supportDashboardBuild';
             const previousBuild = localStorage.getItem(KEY);
 
@@ -32,7 +32,7 @@
             sessionStorage.removeItem('supportDashboardBuildReload');
         })();
     </script>
-    <link rel="stylesheet" href="style.css?v=7.15&t=20260612-notification-live">
+    <link rel="stylesheet" href="style.css?v=7.16&t=20260615-inline-expand">
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
     <!-- Firebase SDK -->
     <script type="module">
@@ -47,7 +47,7 @@
         window.db = getFirestore(window.firebaseApp);
         
         window.auth = getAuth(window.firebaseApp);
-        window.functions = getFunctions(window.firebaseApp);
+        window.functions = getFunctions(window.firebaseApp, "europe-west10");
         window.httpsCallable = httpsCallable;
         window.storage = getStorage(window.firebaseApp);
         window.collection = collection;
@@ -69,7 +69,7 @@
         
         console.log('🔧 تم تهيئة Firebase بإعدادات محسّنة');
     </script>
-    <script src="script.js?v=7.15&t=20260612-notification-live"></script>
+    <script src="script.js?v=7.16&t=20260813-admin-functions"></script>
 </head>
 <body>
     <!-- صفحة تسجيل الدخول - تصميم فاخر -->
@@ -922,6 +922,141 @@
         
         <!-- Sidebar overlay for mobile drawers -->
         <div class="sidebar-overlay" id="sidebarOverlay" style="display: none;"></div>
+
+        <!-- نافذة تحديث التطبيق المنبثقة (Update Modal) -->
+        <div id="updateModal" class="update-modal-overlay" style="display: none;">
+            <style>
+                .update-modal-overlay {
+                    position: fixed;
+                    inset: 0;
+                    z-index: 99999;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    background: rgba(15, 23, 42, 0.85);
+                    backdrop-filter: blur(8px);
+                    padding: 1rem;
+                    direction: rtl;
+                }
+                .update-modal-card {
+                    background: white;
+                    border-radius: 24px;
+                    max-width: 480px;
+                    width: 100%;
+                    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+                    border: 1px solid rgba(226, 232, 240, 0.8);
+                    overflow: hidden;
+                    animation: updateModalOpen 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+                }
+                body.dark-mode .update-modal-card {
+                    background: #1e293b;
+                    border-color: #334155;
+                }
+                .update-modal-header {
+                    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+                    padding: 2.5rem 2rem 2rem 2rem;
+                    text-align: center;
+                    color: white;
+                    position: relative;
+                }
+                .update-modal-icon-wrapper {
+                    width: 80px;
+                    height: 80px;
+                    background: rgba(255, 255, 255, 0.15);
+                    border-radius: 24px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    margin: 0 auto 1.5rem auto;
+                    border: 1px solid rgba(255, 255, 255, 0.25);
+                    box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+                    transform: rotate(10deg);
+                    animation: pulseSlow 3s infinite;
+                }
+                .update-modal-header h3 {
+                    font-size: 1.5rem;
+                    font-weight: 900;
+                    margin: 0;
+                    color: white;
+                }
+                #updateModalCloseBtn {
+                    position: absolute;
+                    top: 1rem;
+                    left: 1rem;
+                    border: none;
+                    background: rgba(255, 255, 255, 0.15);
+                    color: white;
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 50%;
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    transition: all 0.2s;
+                }
+                #updateModalCloseBtn:hover {
+                    background: rgba(255, 255, 255, 0.3);
+                }
+                .update-modal-body {
+                    padding: 2rem;
+                    text-align: center;
+                }
+                #updateModalMessage {
+                    color: #475569;
+                    font-size: 1rem;
+                    line-height: 1.7;
+                    margin: 0 0 2rem 0;
+                    font-weight: 500;
+                }
+                body.dark-mode #updateModalMessage {
+                    color: #cbd5e1;
+                }
+                #updateModalLink {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 0.75rem;
+                    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+                    color: white;
+                    text-decoration: none;
+                    padding: 1rem 2rem;
+                    border-radius: 14px;
+                    font-weight: 700;
+                    font-size: 1.1rem;
+                    box-shadow: 0 10px 15px -3px rgba(124, 58, 237, 0.3);
+                    transition: all 0.3s;
+                }
+                #updateModalLink:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 12px 20px -3px rgba(124, 58, 237, 0.4);
+                }
+                @keyframes updateModalOpen {
+                    from { transform: scale(0.9) translateY(20px); opacity: 0; }
+                    to { transform: scale(1) translateY(0); opacity: 1; }
+                }
+                @keyframes pulseSlow {
+                    0%, 100% { transform: scale(1) rotate(10deg); }
+                    50% { transform: scale(1.05) rotate(10deg); }
+                }
+            </style>
+            <div class="update-modal-card">
+                <div class="update-modal-header">
+                    <div class="update-modal-icon-wrapper">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(-10deg); color: white;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                    </div>
+                    <h3 id="updateModalTitle">تحديث جديد متوفر</h3>
+                    <button type="button" id="updateModalCloseBtn" title="إغلاق">✕</button>
+                </div>
+                <div class="update-modal-body">
+                    <p id="updateModalMessage">يتوفر إصدار أحدث من التطبيق يحتوي على تحسينات وإصلاحات مهمة. يرجى تحديث التطبيق للاستمرار في استخدام جميع الميزات بأفضل أداء.</p>
+                    <a id="updateModalLink" href="#" target="_blank" rel="noopener noreferrer">
+                        <span>تحديث الآن</span>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+                    </a>
+                </div>
+            </div>
+        </div>
     </div>
 </body>
 </html>
