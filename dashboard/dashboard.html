@@ -2278,6 +2278,104 @@ object PageTracker {
             const [copiedError, setCopiedError] = React.useState(false);
             const itemsPerPage = 10;
 
+            // دالة تحويل وتدقيق التواريخ وأوقات الأعطال إلى ملي ثانية للترتيب الدقيق
+            const parseCrashDateMs = (dateVal, fallbackTimeStr) => {
+                if (!dateVal) return 0;
+                const ms = toMs(dateVal);
+                if (ms > 0) return ms;
+                if (typeof dateVal === 'string') {
+                    const trimmed = dateVal.trim();
+                    if (!trimmed) return 0;
+                    let fullStr = trimmed;
+                    if (fallbackTimeStr && typeof fallbackTimeStr === 'string' && !trimmed.includes(':')) {
+                        fullStr = `${trimmed} ${fallbackTimeStr.trim()}`;
+                    }
+                    let parsed = Date.parse(fullStr);
+                    if (!isNaN(parsed) && parsed > 0) return parsed;
+                    parsed = Date.parse(fullStr.replace(/-/g, '/'));
+                    if (!isNaN(parsed) && parsed > 0) return parsed;
+                }
+                return 0;
+            };
+
+            // دالة مساعدة لتنسيق كائن التاريخ بصيغة: YYYY-MM-DD, hh:mm:ss AM/PM
+            const formatToEnglishDateTime = (d) => {
+                const year = d.getFullYear();
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                let hours = d.getHours();
+                const minutes = String(d.getMinutes()).padStart(2, '0');
+                const seconds = String(d.getSeconds()).padStart(2, '0');
+                const ampm = hours >= 12 ? 'PM' : 'AM';
+                hours = hours % 12 || 12;
+                const hoursStr = String(hours).padStart(2, '0');
+                return `${year}-${month}-${day}, ${hoursStr}:${minutes}:${seconds} ${ampm}`;
+            };
+
+            // دالة مساعدة لتنسيق كائن التاريخ بصيغة: YYYY-MM-DD
+            const formatToEnglishDate = (d) => {
+                const year = d.getFullYear();
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            };
+
+            // دالة تنسيق وقت الخطأ وتاريخه بالإنجليزية
+            const formatCrashTime = (timeVal) => {
+                if (!timeVal && timeVal !== 0) return '—';
+                const ms = toMs(timeVal);
+                if (ms > 0) {
+                    const d = new Date(ms);
+                    if (!isNaN(d.getTime())) {
+                        return formatToEnglishDateTime(d);
+                    }
+                }
+                if (typeof timeVal === 'string') {
+                    const trimmed = timeVal.trim();
+                    if (!trimmed || trimmed === '00:00:00') return '—';
+                    let parsed = Date.parse(trimmed);
+                    if (isNaN(parsed)) {
+                        parsed = Date.parse(trimmed.replace(/-/g, '/'));
+                    }
+                    if (!isNaN(parsed) && parsed > 0) {
+                        const d = new Date(parsed);
+                        if (!isNaN(d.getTime())) {
+                            return formatToEnglishDateTime(d);
+                        }
+                    }
+                    return trimmed;
+                }
+                return String(timeVal);
+            };
+
+            // دالة تنسيق تاريخ الخطأ بالإنجليزية
+            const formatCrashDate = (dateVal, msFallback) => {
+                if (!dateVal && !msFallback) return '—';
+                const ms = msFallback || toMs(dateVal);
+                if (ms > 0) {
+                    const d = new Date(ms);
+                    if (!isNaN(d.getTime())) {
+                        return formatToEnglishDate(d);
+                    }
+                }
+                if (typeof dateVal === 'string') {
+                    const trimmed = dateVal.trim();
+                    if (!trimmed) return '—';
+                    let parsed = Date.parse(trimmed);
+                    if (isNaN(parsed)) {
+                        parsed = Date.parse(trimmed.replace(/-/g, '/'));
+                    }
+                    if (!isNaN(parsed) && parsed > 0) {
+                        const d = new Date(parsed);
+                        if (!isNaN(d.getTime())) {
+                            return formatToEnglishDate(d);
+                        }
+                    }
+                    return trimmed;
+                }
+                return String(dateVal);
+            };
+
             // قراءة البيانات الحقيقية من Firebase
             React.useEffect(() => {
                 if (!db) {
@@ -2289,6 +2387,19 @@ object PageTracker {
                     const crashesData = [];
                     snapshot.forEach((doc) => {
                         const data = doc.data();
+                        const affectedUsersArr = Array.isArray(data.affectedUsers) ? data.affectedUsers : [];
+                        const devicesArr = Array.isArray(data.devices) ? data.devices : [];
+                        const usersAffectedNum = typeof data.usersAffected === 'number' 
+                            ? data.usersAffected 
+                            : (Number(data.usersAffected) || Math.max(affectedUsersArr.length, devicesArr.length, 1));
+
+                        const crashTimeStr = data.crashTime || '00:00:00';
+                        const lastSeenVal = data.lastSeenAt || data.lastSeen || data.updatedAt || data.timestamp;
+                        const firstSeenVal = data.firstSeenAt || data.firstSeen || data.createdAt || data.timestamp;
+
+                        const lastSeenMs = parseCrashDateMs(lastSeenVal, crashTimeStr);
+                        const firstSeenMs = parseCrashDateMs(firstSeenVal, crashTimeStr);
+
                         crashesData.push({
                             docId: doc.id,
                             id: data.id !== undefined ? data.id : doc.id,
@@ -2297,12 +2408,14 @@ object PageTracker {
                             screen: data.screen || 'Unknown Screen',
                             file: data.file || 'Unknown File',
                             line: data.line || 0,
-                            usersAffected: data.usersAffected || 1,
+                            usersAffected: usersAffectedNum,
                             appVersion: data.appVersion || 'Unknown',
                             androidVersion: data.androidVersion || 'Unknown',
-                            devices: Array.isArray(data.devices) ? data.devices : [],
-                            firstSeen: data.firstSeen || new Date().toISOString().split('T')[0],
-                            lastSeen: data.lastSeen || new Date().toISOString().split('T')[0],
+                            devices: devicesArr,
+                            firstSeen: data.firstSeen || (firstSeenMs ? new Date(firstSeenMs).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
+                            lastSeen: data.lastSeen || (lastSeenMs ? new Date(lastSeenMs).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
+                            firstSeenMs,
+                            lastSeenMs,
                             status: data.status || 'open',
                             lessonName: data.lessonName || null,
                             userCountry: data.userCountry || 'Unknown',
@@ -2312,12 +2425,11 @@ object PageTracker {
                             screenInch: data.screenInch || 'Unknown',
                             screenDp: data.screenDp || 'Unknown',
                             screenDpi: data.screenDpi || 'Unknown',
-                            crashTime: data.crashTime || '00:00:00',
-                            affectedUsers: Array.isArray(data.affectedUsers) ? data.affectedUsers : []
+                            crashTime: crashTimeStr,
+                            affectedUsers: affectedUsersArr
                         });
                     });
                     
-                    crashesData.sort((a, b) => new Date(b.lastSeen) - new Date(a.lastSeen));
                     setCrashes(crashesData);
                 }, (error) => {
                     console.error('❌ خطأ في تحميل بيانات الأعطال:', error);
@@ -2327,11 +2439,12 @@ object PageTracker {
                 return () => unsubscribe();
             }, []);
 
-            // الإحصائيات
+            // الإحصائيات الحقيقية
             const totalCrashes = crashes.length;
-            const todayCrashes = crashes.filter(c => c.lastSeen === '2026-06-11').length;
+            const todayStr = new Date().toISOString().split('T')[0];
+            const todayCrashes = crashes.filter(c => c.lastSeen === todayStr || (c.lastSeenMs && new Date(c.lastSeenMs).toISOString().split('T')[0] === todayStr)).length;
             const totalAffectedUsers = new Set(crashes.flatMap(c => c.devices)).size;
-            const topPage = crashes.reduce((a, b) => b.usersAffected > a.usersAffected ? b : a, crashes[0] || {});
+            const topPage = crashes.reduce((a, b) => (b.usersAffected || 0) > (a.usersAffected || 0) ? b : a, crashes[0] || {});
 
             // البحث والفلترة
             const filtered = crashes.filter(c => {
@@ -2346,11 +2459,27 @@ object PageTracker {
                 return matchSearch && matchStatus && matchError && matchDevice;
             });
 
-            // الترتيب
+            // الترتيب الحقيقي للأعطال
             const sorted = [...filtered].sort((a, b) => {
-                if (sortBy === 'lastSeen') return new Date(b.lastSeen) - new Date(a.lastSeen);
-                if (sortBy === 'affected') return b.usersAffected - a.usersAffected;
-                if (sortBy === 'firstSeen') return new Date(b.firstSeen) - new Date(a.firstSeen);
+                if (sortBy === 'lastSeen') {
+                    const timeA = a.lastSeenMs || parseCrashDateMs(a.lastSeen, a.crashTime);
+                    const timeB = b.lastSeenMs || parseCrashDateMs(b.lastSeen, b.crashTime);
+                    if (timeB !== timeA) return timeB - timeA;
+                    return (b.usersAffected || 0) - (a.usersAffected || 0);
+                }
+                if (sortBy === 'affected') {
+                    const diff = (b.usersAffected || 0) - (a.usersAffected || 0);
+                    if (diff !== 0) return diff;
+                    const timeA = a.lastSeenMs || parseCrashDateMs(a.lastSeen, a.crashTime);
+                    const timeB = b.lastSeenMs || parseCrashDateMs(b.lastSeen, b.crashTime);
+                    return timeB - timeA;
+                }
+                if (sortBy === 'firstSeen') {
+                    const timeA = a.firstSeenMs || parseCrashDateMs(a.firstSeen, a.crashTime);
+                    const timeB = b.firstSeenMs || parseCrashDateMs(b.firstSeen, b.crashTime);
+                    if (timeB !== timeA) return timeB - timeA;
+                    return (b.usersAffected || 0) - (a.usersAffected || 0);
+                }
                 return 0;
             });
 
@@ -2623,7 +2752,7 @@ Crash #${crash.id}
                                 </div>
                                 <div className="text-right">
                                     <p className="text-sm mb-1" style={{color: 'var(--text-muted)'}}>آخر ظهور:</p>
-                                    <p className="text-2xl font-black whitespace-nowrap" style={{color: 'var(--text-primary)'}}>{selectedCrash.lastSeen}</p>
+                                    <p className="text-2xl font-black whitespace-nowrap" style={{color: 'var(--text-primary)'}}>{formatCrashTime(selectedCrash.lastSeenMs || selectedCrash.lastSeen || selectedCrash.crashTime)}</p>
                                 </div>
                             </div>
                         </div>
@@ -2669,7 +2798,7 @@ Crash #${crash.id}
                                     <div><span style={{color: 'var(--text-muted)'}}>حجم الشاشة (بالإنش):</span> <span className="font-mono text-xs" style={{color: '#0369a1'}}>{selectedDeviceData?.screenInch}</span></div>
                                     <div><span style={{color: 'var(--text-muted)'}}>أبعاد الشاشة (DP):</span> <span className="font-mono text-xs" style={{color: '#059669'}}>{selectedDeviceData?.screenDp}</span></div>
                                     <div><span style={{color: 'var(--text-muted)'}}>الكثافة (DPI):</span> <span className="font-mono text-xs" style={{color: '#7c3aed'}}>{selectedDeviceData?.screenDpi}</span></div>
-                                    <div><span style={{color: 'var(--text-muted)'}}>وقت الخطأ:</span> <span className="font-bold" style={{color: '#dc2626'}}>{selectedDeviceData?.crashTime}</span></div>
+                                    <div><span style={{color: 'var(--text-muted)'}}>وقت الخطأ:</span> <span className="font-bold" style={{color: '#dc2626'}}>{formatCrashTime(selectedDeviceData?.crashTime)}</span></div>
                                 </div>
                             </div>
                         </div>
@@ -2706,15 +2835,15 @@ Crash #${crash.id}
                                 <div className="space-y-3">
                                     <div className="rounded-lg p-4" style={{backgroundColor: 'rgba(96, 165, 250, 0.1)'}}>
                                         <p className="text-xs mb-1" style={{color: 'var(--text-muted)'}}>🔸 أول ظهور</p>
-                                        <p className="font-black text-lg whitespace-nowrap" style={{color: '#0369a1'}}>{selectedCrash.firstSeen}</p>
+                                        <p className="font-black text-lg whitespace-nowrap" style={{color: '#0369a1'}}>{formatCrashDate(selectedCrash.firstSeen, selectedCrash.firstSeenMs)}</p>
                                     </div>
                                     <div className="rounded-lg p-4" style={{backgroundColor: 'rgba(239, 68, 68, 0.1)'}}>
                                         <p className="text-xs mb-1" style={{color: 'var(--text-muted)'}}>🔴 آخر ظهور</p>
-                                        <p className="font-black text-lg whitespace-nowrap" style={{color: '#dc2626'}}>{selectedCrash.lastSeen}</p>
+                                        <p className="font-black text-lg whitespace-nowrap" style={{color: '#dc2626'}}>{formatCrashDate(selectedCrash.lastSeen, selectedCrash.lastSeenMs)}</p>
                                     </div>
                                     <div className="rounded-lg p-4" style={{backgroundColor: 'var(--bg-gray-100)'}}>
                                         <p className="text-xs mb-1" style={{color: 'var(--text-muted)'}}>📊 عدد الأيام</p>
-                                        <p className="font-black text-lg whitespace-nowrap" style={{color: 'var(--text-primary)'}}>{Math.ceil((new Date(selectedCrash.lastSeen) - new Date(selectedCrash.firstSeen)) / (1000 * 60 * 60 * 24))} أيام</p>
+                                        <p className="font-black text-lg whitespace-nowrap" style={{color: 'var(--text-primary)'}}>{Math.max(1, Math.ceil(Math.max(0, (selectedCrash.lastSeenMs || parseCrashDateMs(selectedCrash.lastSeen)) - (selectedCrash.firstSeenMs || parseCrashDateMs(selectedCrash.firstSeen))) / (1000 * 60 * 60 * 24)))} أيام</p>
                                     </div>
                                 </div>
                             </div>
@@ -2745,7 +2874,7 @@ Crash #${crash.id}
                                         <div className="flex items-center gap-3">
                                             <div className="text-right">
                                                 <p className="text-sm font-semibold" style={{color: 'var(--text-secondary)'}}>{user.device}</p>
-                                                <p className="text-xs" style={{color: 'var(--text-muted)'}}>{user.time}</p>
+                                                <p className="text-xs" style={{color: 'var(--text-muted)'}}>{formatCrashTime(user.time || user.crashTime)}</p>
                                             </div>
                                             {selectedUserIndex === i && <i className="fas fa-check text-green-500 text-lg"></i>}
                                         </div>
@@ -2849,7 +2978,7 @@ Crash #${crash.id}
 
                             <div>
                                 <label className="block text-sm font-bold mb-2" style={{color: 'var(--text-secondary)'}}>⬆️ ترتيب</label>
-                                <select value={sortBy} onChange={e => setSortBy(e.target.value)}
+                                <select value={sortBy} onChange={e => { setSortBy(e.target.value); setCurrentPage(1); }}
                                     className="w-full px-4 py-3 border-2 rounded-lg focus:outline-none" style={{backgroundColor: 'var(--input-bg)', color: 'var(--input-text)', borderColor: 'var(--input-border)'}}>
                                     <option value="lastSeen">آخر ظهور</option>
                                     <option value="affected">الأكثر تأثراً</option>
@@ -2950,7 +3079,7 @@ Crash #${crash.id}
                                                         <option value="closed">⚪ مغلق</option>
                                                     </select>
                                                 </td>
-                                                <td className="px-6 py-4 text-sm whitespace-nowrap" style={{color: 'var(--text-muted)'}}>{crash.lastSeen}</td>
+                                                <td className="px-6 py-4 text-sm whitespace-nowrap" style={{color: 'var(--text-muted)'}}>{formatCrashDate(crash.lastSeen, crash.lastSeenMs)}</td>
                                                 <td className="px-4 py-4 text-center whitespace-nowrap" onClick={e => e.stopPropagation()}>
                                                     <button onClick={() => deleteCrashes([crashKey])}
                                                         title="حذف العطل"
