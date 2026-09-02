@@ -406,6 +406,11 @@
             annual: 199.99
         };
 
+        // أسعار الكتالوج بالدينار العراقي — تُستخدم تقديراً فقط عند غياب
+        // سعر موثق من المتجر (هواوي لا يرسل الأسعار في بيانات الشراء).
+        const PLAN_PRICES_IQD = { monthly: 25000, quarterly: 69000, semiAnnual: 134000, annual: 242000 };
+        const PLAN_NAMES_AR = { monthly: 'شهري', quarterly: 'ربع سنوي', semiAnnual: 'نصف سنوي', annual: 'سنوي' };
+
         // ===================== دوال مساعدة =====================
         const formatNumber = (num) => {
             if (!num && num !== 0) return '0';
@@ -417,6 +422,8 @@
         const formatCurrency = (num) => {
             return '$' + (num || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         };
+
+        const formatIqd = (num) => Math.round(Number(num) || 0).toLocaleString('en-US') + ' د.ع';
 
         const toMs = (ts) => {
             if (!ts) return 0;
@@ -631,6 +638,47 @@
             return null; // لا توجد خطة محددة
         };
 
+        // ============== بيانات PRO الحقيقية (proEntitlements / zainCashPayments / proGrants) ==============
+        // المصدر الوحيد للحقيقة: مستندات الاستحقاق التي يكتبها السيرفر بعد
+        // التحقق من المتجر — لا حقول يدوية في مستند المستخدم.
+        const entPlanKey = (e) => {
+            if (!e || e.provider === 'ADMIN_GRANT') return null;
+            const pid = String(e.productId || (e.display && e.display.basePlanId) || '').toLowerCase();
+            // النصف سنوي قبل السنوي: معرف semiannual يحتوي annual أيضاً
+            if (pid.includes('semi') || pid.includes('half') || pid.includes('6')) return 'semiAnnual';
+            if (pid.includes('quarter') || pid.includes('3')) return 'quarterly';
+            if (pid.includes('year') || pid.includes('annual') || pid.includes('12')) return 'annual';
+            if (pid.includes('month') || pid.includes('1')) return 'monthly';
+            const s = Number((e.display && e.display.startedAtMillis) || 0);
+            const x = Number(e.expiresAtMillis || 0);
+            if (s > 0 && x > s) {
+                const months = Math.round((x - s) / (30 * 86400000));
+                if (months >= 11) return 'annual';
+                if (months >= 5) return 'semiAnnual';
+                if (months >= 2) return 'quarterly';
+                if (months >= 1) return 'monthly';
+            }
+            return null;
+        };
+        const entSource = (e) => {
+            if (!e) return 'unknown';
+            if (e.provider === 'ADMIN_GRANT') return 'admin';
+            if (e.provider === 'HUAWEI_IAP') return 'huawei';
+            if (e.provider === 'ZAIN_CASH') return 'zain';
+            if (e.purchaseTokenHash || e.latestOrderId) return 'play';
+            return 'unknown';
+        };
+        const SOURCE_LABELS = { play: 'Google Play', huawei: 'Huawei IAP', zain: 'زين كاش', admin: 'منحة إدارية', unknown: 'غير معروف' };
+        const entActiveNow = (e) => !!e && e.active === true && Number(e.expiresAtMillis || 0) > Date.now();
+        const entStartMs = (e) => Number((e.display && e.display.startedAtMillis) || 0);
+        // سعر موثق من بيانات المتجر (Play/زين كاش يرسلانه) وإلا كتالوج تقديري
+        const entPriceIqd = (e, key) => {
+            const micros = Number((e.display && e.display.priceAmountMicros) || 0);
+            if (micros > 0) return micros / 1e6;
+            return PLAN_PRICES_IQD[key] || 0;
+        };
+        const entPriceConfirmed = (e) => Number((e.display && e.display.priceAmountMicros) || 0) > 0;
+
         // ===================== هل تطبيقك يحتوي على بيانات الاشتراك؟ =====================
         const checkHasSubscriptionData = (users) => {
             return users.some(u =>
@@ -645,8 +693,22 @@
         };
 
         // ===================== معالجة البيانات من Firebase =====================
-        const processFirebaseData = (realUsers, realReports, realPageViews) => {
-            const hasSubData = checkHasSubscriptionData(realUsers);
+        const processFirebaseData = (realUsers, realReports, realPageViews, proEntitlements, zainCashPayments, proGrants, proEvents) => {
+            proEntitlements = Array.isArray(proEntitlements) ? proEntitlements : [];
+            zainCashPayments = Array.isArray(zainCashPayments) ? zainCashPayments : [];
+            proGrants = Array.isArray(proGrants) ? proGrants : [];
+            proEvents = Array.isArray(proEvents) ? proEvents : [];
+            // عدّادات مسار الشراء الإجمالية (منذ الإطلاق): purchase_clicked وغيرها
+            const proEventsAgg = {};
+            proEvents.forEach(ev => {
+                if (ev && ev.id) proEventsAgg[ev.id] = {
+                    count: Number(ev.count) || 0,
+                    uniqueUsers: Number(ev.uniqueUsers) || 0,
+                    byPlan: ev.byPlan && typeof ev.byPlan === 'object' ? ev.byPlan : {}
+                };
+            });
+            // الحقيقة الآن: مستندات استحقاق فعلية موجودة على السيرفر
+            const hasSubData = proEntitlements.length > 0 || checkHasSubscriptionData(realUsers);
             const hasBehaviorData = checkHasBehaviorData(realUsers);
 
             // بناء Map للمستخدمين مع منع التكرار (الدمج عبر UID أو البريد الإلكتروني)
@@ -709,10 +771,18 @@
 
             const allUsers = Array.from(userMap.values());
 
+            const entUserEmail2 = (uid) => {
+                const key = uidToKey.get(uid);
+                const u0 = key ? userMap.get(key) : null;
+                return (u0 && (u0.email || u0.userEmail)) || uid || '';
+            };
+
             // توليد قائمة الأشهر
             const monthsSet = new Set();
             allUsers.forEach(u => { const m = getMonthKey(u.createdAt || u.timestamp); if (m) monthsSet.add(m); });
             realReports.forEach(r => { const m = getMonthKey(r.timestamp); if (m) monthsSet.add(m); });
+            proEntitlements.forEach(e => { const m = getMonthKey(entStartMs(e)); if (m) monthsSet.add(m); });
+            zainCashPayments.forEach(p => { const m = getMonthKey(toMs(p.activatedAtMillis || p.createdAt || 0)); if (m) monthsSet.add(m); });
 
             let sortedMonths = Array.from(monthsSet).filter(Boolean).sort();
             if (sortedMonths.length === 0) {
@@ -741,21 +811,28 @@
 
             // بناء البيانات الشهرية
             const dynamicStoredData = {};
+            const funnelByMonth = {};
             sortedMonths.forEach(mStr => {
                 const usersUpTo = allUsers.filter(u => { const um = getMonthKey(u.createdAt || u.timestamp); return um && um <= mStr; });
                 const newThisMonth = allUsers.filter(u => getMonthKey(u.createdAt || u.timestamp) === mStr);
                 const reportsThisMonth = realReports.filter(r => getMonthKey(r.timestamp) === mStr);
 
-                let subscribers = 0, monthly = 0, quarterly = 0, semiAnnual = 0, annual = 0;
-                usersUpTo.forEach(u => {
-                    const plan = getPlanType(u);
-                    if (plan) {
-                        subscribers++;
-                        if (plan === 'monthly') monthly++;
-                        else if (plan === 'quarterly') quarterly++;
-                        else if (plan === 'semiAnnual') semiAnnual++;
-                        else if (plan === 'annual') annual++;
-                    }
+                // المشتركون من مستندات الاستحقاق الحقيقية: من كان مشتركاً
+                // فعلياً في نهاية ذلك الشهر (أو الآن للشهر الجاري).
+                let subscribers = 0, monthly = 0, quarterly = 0, semiAnnual = 0, annual = 0, adminGrants = 0;
+                const [yyCur, mmCur] = mStr.split('-').map(Number);
+                const monthEndMs = new Date(yyCur, mmCur, 1).getTime() - 1;
+                const cutMs = monthEndMs > Date.now() ? Date.now() : monthEndMs;
+                proEntitlements.forEach(e => {
+                    const s = entStartMs(e), x = Number(e.expiresAtMillis || 0);
+                    if (!s || !x || s > cutMs || x <= cutMs) return;
+                    const key = entPlanKey(e);
+                    subscribers++;
+                    if (key === 'monthly') monthly++;
+                    else if (key === 'quarterly') quarterly++;
+                    else if (key === 'semiAnnual') semiAnnual++;
+                    else if (key === 'annual') annual++;
+                    else adminGrants++;
                 });
 
                 const registered = usersUpTo.length - subscribers;
@@ -763,65 +840,144 @@
                 const guests = hasSubData ? Math.round(usersUpTo.length * 0.18) : 0;
                 const total = usersUpTo.length + guests;
 
-                // حساب الأرباح (فقط إذا كانت بيانات الاشتراك موجودة)
-                const subRevenue = hasSubData ? (
-                    monthly * PLAN_PRICES.monthly +
-                    quarterly * (PLAN_PRICES.quarterly / 3) +
-                    semiAnnual * (PLAN_PRICES.semiAnnual / 6) +
-                    annual * (PLAN_PRICES.annual / 12)
-                ) : 0;
-                const adsRevenue = hasSubData ? Math.round(guests * 0.5 + registered * 0.15) : 0;
-                const totalRevenue = Math.round(subRevenue + adsRevenue);
+                // إيراد موثوق: دفعات زين كاش ناجحة فعلياً خلال الشهر
+                const zainCashRevenue = zainCashPayments.reduce((sum, p) => {
+                    if (String(p.status || '').toUpperCase() !== 'SUCCESS') return sum;
+                    const t = toMs(p.activatedAtMillis || p.createdAt || 0);
+                    return getMonthKey(t) === mStr ? sum + (Number(p.amountIqd) || 0) : sum;
+                }, 0);
+                // إيراد المتاجر: قيمة أول فترة لكل اشتراك بدأ في الشهر
+                // (Play سعره موثق من بيانات الشراء؛ هواوي تقديري من الكتالوج؛
+                // زين كاش مستثنى لأن دفعاته محسوبة أعلاه — منع الازدواج)
+                let storeRevenue = 0, storeEstimatedPart = 0;
+                proEntitlements.forEach(e => {
+                    const src = entSource(e);
+                    if (src === 'admin' || src === 'zain') return;
+                    if (getMonthKey(entStartMs(e)) !== mStr) return;
+                    const price = entPriceIqd(e, entPlanKey(e));
+                    storeRevenue += price;
+                    if (!entPriceConfirmed(e)) storeEstimatedPart += price;
+                });
+                const subRevenue = Math.round(zainCashRevenue + storeRevenue);
+                const adsRevenue = 0; // أرباح الإعلانات تُدار من تبويب AdMob وليست هنا
+                const totalRevenue = subRevenue;
 
-                // سلوك الدفع (من حقل paymentEvents إن وجد، وإلا محاكاة بسيطة)
-                const completedPayment = subscribers;
-                const clickedSubscribe = Math.round(subscribers * 1.4 + registered * 0.08);
-                const openedPaymentNoCard = Math.round(subscribers * 1.2);
-                const enteredCardNoComplete = Math.round(subscribers * 0.18);
-                const failedPayment = Math.round(subscribers * 0.07);
+                // مسار الدفع الحقيقي: مراحل زين كاش من حالاتها الفعلية +
+                // إتمام الشراء من دفعات SUCCESS وبدايات اشتراكات المتاجر.
+                funnelByMonth[mStr] = { opened: [], entered: [], completed: [], failed: [] };
+                zainCashPayments.forEach(p => {
+                    const st = String(p.status || '').toUpperCase();
+                    const createdMs = toMs(p.createdAt || 0);
+                    const okMs = Number(p.activatedAtMillis || 0);
+                    const who = entUserEmail2(p.uid || '');
+                    if (st === 'SUCCESS') {
+                        if (getMonthKey(okMs) === mStr) funnelByMonth[mStr].completed.push({ email: who, at: okMs, plan: p.planId || '', amountIqd: Number(p.amountIqd) || 0, source: 'زين كاش' });
+                    } else if (st === 'PENDING') {
+                        const t = toMs(p.initiatedAt || 0) || createdMs;
+                        if (getMonthKey(t) === mStr) funnelByMonth[mStr].entered.push({ email: who, at: t, plan: p.planId || '', source: 'زين كاش' });
+                    } else if (st === 'INIT_FAILED' || st === 'INIT_INVALID') {
+                        const t = toMs(p.failedAt || 0) || createdMs;
+                        if (getMonthKey(t) === mStr) funnelByMonth[mStr].failed.push({ email: who, at: t, plan: p.planId || '', source: 'زين كاش', reason: st === 'INIT_FAILED' ? 'فشل بدء الدفع' : 'طلب بدء غير صالح' });
+                    } else if (st === 'INITIATING') {
+                        if (getMonthKey(createdMs) === mStr) funnelByMonth[mStr].opened.push({ email: who, at: createdMs, plan: p.planId || '', source: 'زين كاش' });
+                    }
+                });
+                proEntitlements.forEach(e => {
+                    const src = entSource(e);
+                    if (src === 'admin' || src === 'zain') return;
+                    const s = entStartMs(e);
+                    if (getMonthKey(s) !== mStr) return;
+                    funnelByMonth[mStr].completed.push({
+                        email: entUserEmail2(e.uid || e.id || ''),
+                        at: s,
+                        plan: entPlanKey(e) ? PLAN_NAMES_AR[entPlanKey(e)] : '',
+                        source: SOURCE_LABELS[src]
+                    });
+                });
+                funnelByMonth[mStr].completed.sort((a, b) => b.at - a.at);
+                const completedPayment = funnelByMonth[mStr].completed.length;
+                const openedPaymentNoCard = funnelByMonth[mStr].opened.length;
+                const enteredCardNoComplete = funnelByMonth[mStr].entered.length;
+                const failedPayment = funnelByMonth[mStr].failed.length;
+                // النقر على زر الاشتراك: عدّاد إجمالي منذ الإطلاق (proEvents)
+                // — التتبع الشهري لتفرد النقرات غير متاح لأنه عدّاد مجمّع.
+                const clickedSubscribe = (proEventsAgg.purchase_clicked && proEventsAgg.purchase_clicked.count) || 0;
 
                 dynamicStoredData[mStr] = {
                     name: getMonthName(mStr),
                     users: { total, registered, subscribers, guests, newThisMonth: newThisMonth.length },
                     subscriptions: { monthly, quarterly, semiAnnual, annual },
-                    revenue: { ads: adsRevenue, subscriptions: Math.round(subRevenue), total: totalRevenue },
+                    revenue: { ads: adsRevenue, subscriptions: Math.round(subRevenue), total: totalRevenue, zainCash: Math.round(zainCashRevenue), store: Math.round(storeRevenue), storeEstimated: Math.round(storeEstimatedPart) },
                     reports: { count: reportsThisMonth.length },
                     behavior: { clickedSubscribe, openedPaymentNoCard, enteredCardNoComplete, completedPayment, failedPayment }
                 };
             });
 
-            // قائمة المستخدمين المفصلة
+            // قائمة المستخدمين المفصلة — الخطة والحالة من الاستحقاق الحقيقي
+            const entByUid = new Map();
+            proEntitlements.forEach(e => {
+                const uid = e.uid || e.id || '';
+                if (uid && !entByUid.has(uid)) entByUid.set(uid, e);
+            });
             const dynamicUsersList = allUsers.map(u => {
-                const planType = getPlanType(u);
-                const planNames = { monthly: 'شهري', quarterly: 'ربع سنوي', semiAnnual: 'نصف سنوي', annual: 'سنوي' };
-                const planName = planType ? planNames[planType] : null;
-
-                const startMs = toMs(u.subscriptionStart || u.subscribedAt || u.planStart || u.createdAt || 0);
+                const uid = u.authUid || u.uid || u.id || '';
+                const ent = entByUid.get(uid);
+                const planType = ent ? entPlanKey(ent) : null;
+                const planName = ent
+                    ? (planType ? PLAN_NAMES_AR[planType] : 'منحة مجانية')
+                    : null;
+                const startMs = ent ? entStartMs(ent) : 0;
                 const startDate = startMs ? new Date(startMs).toISOString().split('T')[0] : null;
-
-                let endDate = null;
-                const endMs = toMs(u.subscriptionEnd || u.expiresAt || u.planEnd || 0);
-                if (endMs) {
-                    endDate = new Date(endMs).toISOString().split('T')[0];
-                } else if (startMs && planType) {
-                    const d = new Date(startMs);
-                    if (planType === 'monthly') d.setMonth(d.getMonth() + 1);
-                    else if (planType === 'quarterly') d.setMonth(d.getMonth() + 3);
-                    else if (planType === 'semiAnnual') d.setMonth(d.getMonth() + 6);
-                    else if (planType === 'annual') d.setFullYear(d.getFullYear() + 1);
-                    endDate = d.toISOString().split('T')[0];
-                }
+                const endDate = ent && ent.expiresAtMillis ? new Date(Number(ent.expiresAtMillis)).toISOString().split('T')[0] : null;
 
                 return {
                     email: u.email || u.userEmail || u.authUid || '—',
                     displayName: u.displayName || u.userName || '—',
-                    status: planType ? 'subscriber' : 'registered',
+                    status: ent && entActiveNow(ent) ? 'subscriber' : 'registered',
                     plan: planName,
                     planType,
-                    subscribedAt: planType ? startDate : null,
-                    expiresAt: planType ? endDate : null
+                    subscribedAt: startDate,
+                    expiresAt: endDate,
+                    source: ent ? SOURCE_LABELS[entSource(ent)] : null
                 };
             });
+
+            // بيانات تتبع الدفع الحقيقية لتبويب «تتبع الدفع»
+            const entUserEmail = (uid) => {
+                const key = uidToKey.get(uid);
+                const u0 = key ? userMap.get(key) : null;
+                return (u0 && (u0.email || u0.userEmail)) || uid || '';
+            };
+            const paymentsData = {
+                zainCash: zainCashPayments.map(p => ({
+                    orderId: p.orderId || p.id || '',
+                    planId: p.planId || '',
+                    amountIqd: Number(p.amountIqd) || 0,
+                    status: String(p.status || ''),
+                    at: toMs(p.activatedAtMillis || p.createdAt || 0),
+                    email: entUserEmail(p.uid || '')
+                })).sort((a, b) => b.at - a.at),
+                grants: proGrants.map(g => ({
+                    email: g.email || '',
+                    action: g.action || 'GRANT',
+                    days: Number(g.days) || 0,
+                    status: g.status || '',
+                    reason: g.reason || '',
+                    grantedBy: g.grantedBy || '',
+                    at: toMs(g.processedAt) || 0
+                })).sort((a, b) => b.at - a.at),
+                funnel: funnelByMonth,
+                eventsAllTime: proEventsAgg,
+                storeStarts: proEntitlements.filter(e => entSource(e) !== 'admin').map(e => ({
+                    email: entUserEmail(e.uid || e.id || ''),
+                    source: SOURCE_LABELS[entSource(e)],
+                    plan: entPlanKey(e),
+                    priceIqd: entPriceIqd(e, entPlanKey(e)),
+                    priceConfirmed: entPriceConfirmed(e),
+                    at: entStartMs(e),
+                    expiresAt: Number(e.expiresAtMillis || 0)
+                })).sort((a, b) => b.at - a.at)
+            };
 
             // استخراج أحداث الدفع من حقل paymentEvents إن وجد
             const dynamicGetBehaviorByMonth = (monthKey) => {
@@ -865,7 +1021,9 @@
                 hasSubscriptionData: hasSubData,
                 hasBehaviorData,
                 rawUsers: allUsers,
-                pageViews: realPageViews || []
+                pageViews: realPageViews || [],
+                payments: paymentsData,
+                activeSubscribersNow: proEntitlements.filter(entActiveNow).length
             };
         };
 
@@ -957,9 +1115,9 @@
                     <div className="flex items-start gap-4">
                         <i className="fas fa-exclamation-triangle text-2xl mt-1 shrink-0"></i>
                         <div>
-                            <h3 className="font-black text-lg mb-2">⚠️ بيانات الاشتراكات والأرباح غير متوفرة في Firebase</h3>
+                            <h3 className="font-black text-lg mb-2">📊 لا توجد اشتراكات PRO مسجّلة بعد</h3>
                             <p className="text-amber-100 text-sm mb-3">
-                                تطبيقك لا يحفظ بيانات الاشتراكات في Firebase بعد. لعرض الأرباح الحقيقية، يجب إضافة هذه الحقول لمستند المستخدم في مجموعة <code className="bg-white/20 px-1 rounded">users</code>:
+                                الإحصائيات تُقرأ تلقائياً من مجموعة <code className="bg-white/20 px-1 rounded">proEntitlements</code> (استحقاقات السيرفر بعد التحقق من المتجر) ودفعات <code className="bg-white/20 px-1 rounded">zainCashPayments</code> — بلا أي حقول يدوية. عند أول اشتراك ستظهر الأرقام الحقيقية هنا فوراً.
                             </p>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs font-mono">
                                 {[
@@ -3147,10 +3305,10 @@ Crash #${crash.id}
                     return r;
                 };
 
-                const apply = (users, reports, pageViews) => {
+                const apply = (users, reports, pageViews, proEntitlements, zainCashPayments, proGrants, proEvents) => {
                     if (!active) return;
                     try {
-                        setDbData(processFirebaseData(users, reports, pageViews));
+                        setDbData(processFirebaseData(users, reports, pageViews, proEntitlements, zainCashPayments, proGrants, proEvents));
                         setLoading(false);
                     } catch (e) { console.error(e); setLoading(false); }
                 };
@@ -3162,7 +3320,11 @@ Crash #${crash.id}
                     apply(
                         (e.data.users || []).map(deserialize),
                         (e.data.reports || []).map(deserialize),
-                        (e.data.pageViews || []).map(deserialize)
+                        (e.data.pageViews || []).map(deserialize),
+                        (e.data.proEntitlements || []).map(deserialize),
+                        (e.data.zainCashPayments || []).map(deserialize),
+                        (e.data.proGrants || []).map(deserialize),
+                        (e.data.proEvents || []).map(deserialize)
                     );
                 };
                 window.addEventListener('message', onMsg);
@@ -3382,7 +3544,7 @@ Crash #${crash.id}
                                         subtitle={currentMonthData.users.total > 0
                                             ? `${((currentMonthData.users.subscribers / currentMonthData.users.total) * 100).toFixed(1)}% من المستخدمين`
                                             : hasSubscriptionData ? '0 مشترك' : 'يتطلب بيانات الاشتراك'} />
-                                    <StatCard title="إجمالي الأرباح" value={hasSubscriptionData ? formatCurrency(currentMonthData.revenue.total) : '—'} icon="fas fa-dollar-sign" color="orange" subtitle={hasSubscriptionData ? currentMonthData.name : 'يتطلب بيانات الاشتراك'} />
+                                    <StatCard title={'إيرادات ' + currentMonthData.name} value={formatIqd(currentMonthData.revenue.total)} icon="fas fa-coins" color="orange" subtitle={'زين كاش موثوق: ' + formatIqd(currentMonthData.revenue.zainCash)} />
                                 </div>
 
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -3390,7 +3552,7 @@ Crash #${crash.id}
                                     <div className="bg-white rounded-2xl shadow-xl p-6">
                                         <h3 className="font-bold text-xl text-gray-800 mb-4">
                                             <i className="fas fa-ad text-orange-600 ml-2"></i>أرباح الإعلانات — {currentMonthData.name}
-                                            {!hasSubscriptionData && <span className="mr-2 text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">تقديري</span>}
+                                            {currentMonthData.revenue.ads === 0 && <span className="mr-2 text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">غير مربوط بعد</span>}
                                         </h3>
                                         <div className="space-y-3">
                                             <div className="flex justify-between p-3 bg-gray-50 rounded-lg"><span>من المسجلين:</span><span className="font-bold text-green-600">{formatCurrency(currentMonthData.revenue.ads * 0.73)}</span></div>
@@ -3399,6 +3561,9 @@ Crash #${crash.id}
                                                 <span className="font-bold">إجمالي الإعلانات:</span>
                                                 <span className="font-black text-orange-600">{formatCurrency(currentMonthData.revenue.ads)}</span>
                                             </div>
+                                            <p className="text-[11px] text-gray-400 leading-relaxed">
+                                                الأرقام صفرية حتى ربط حساب Google AdMob: اربط AdMob بواجهة AdMob API عبر Cloud Function يومية تكتب الأرباح في مجموعة adRevenue، فتمتلئ هذه اللوحة تلقائياً (الخطوات عند تبويب «أرباح AdMob»).
+                                            </p>
                                         </div>
                                     </div>
 
@@ -3411,24 +3576,27 @@ Crash #${crash.id}
                                         <div className="space-y-2">
                                             <div className="flex justify-between p-2">
                                                 <span>شهري ({currentMonthData.subscriptions.monthly}):</span>
-                                                <span className="font-bold text-blue-600">{formatCurrency(currentMonthData.subscriptions.monthly * PLAN_PRICES.monthly)}</span>
+                                                <span className="font-bold text-blue-600">{formatIqd(currentMonthData.subscriptions.monthly * PLAN_PRICES_IQD.monthly)}</span>
                                             </div>
                                             <div className="flex justify-between p-2">
                                                 <span>ربع سنوي ({currentMonthData.subscriptions.quarterly}):</span>
-                                                <span className="font-bold text-purple-600">{formatCurrency(currentMonthData.subscriptions.quarterly * PLAN_PRICES.quarterly)}</span>
+                                                <span className="font-bold text-purple-600">{formatIqd(currentMonthData.subscriptions.quarterly * PLAN_PRICES_IQD.quarterly)}</span>
                                             </div>
                                             <div className="flex justify-between p-2">
                                                 <span>نصف سنوي ({currentMonthData.subscriptions.semiAnnual}):</span>
-                                                <span className="font-bold text-pink-600">{formatCurrency(currentMonthData.subscriptions.semiAnnual * PLAN_PRICES.semiAnnual)}</span>
+                                                <span className="font-bold text-pink-600">{formatIqd(currentMonthData.subscriptions.semiAnnual * PLAN_PRICES_IQD.semiAnnual)}</span>
                                             </div>
                                             <div className="flex justify-between p-2">
                                                 <span>سنوي ({currentMonthData.subscriptions.annual}):</span>
-                                                <span className="font-bold text-emerald-600">{formatCurrency(currentMonthData.subscriptions.annual * PLAN_PRICES.annual)}</span>
+                                                <span className="font-bold text-emerald-600">{formatIqd(currentMonthData.subscriptions.annual * PLAN_PRICES_IQD.annual)}</span>
                                             </div>
                                             <div className="flex justify-between p-3 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg mt-3 border border-purple-200">
                                                 <span className="font-bold">إجمالي الاشتراكات:</span>
-                                                <span className="font-black text-purple-700">{formatCurrency(currentMonthData.revenue.subscriptions)}</span>
+                                                <span className="font-black text-purple-700">{formatIqd(currentMonthData.revenue.subscriptions)}</span>
                                             </div>
+                                            <p className="text-[11px] text-gray-400 leading-relaxed">
+                                                الإجمالي محسوب من الفواتير الفعلية: دفعات زين كاش الموثقة ({formatIqd(currentMonthData.revenue.zainCash)}) + اشتراكات المتاجر بسعر أول فترة ({formatIqd(currentMonthData.revenue.store)}، منها تقديري {formatIqd(currentMonthData.revenue.storeEstimated)} لعدم إرسال Huawei للأسعار). قيم الخطط أعلاه بأسعار الكتالوج للعرض.
+                                            </p>
                                         </div>
                                     </div>
                                 </div>
@@ -3438,7 +3606,8 @@ Crash #${crash.id}
                                     <div className="flex justify-between items-center">
                                         <div>
                                             <p className="text-indigo-100 text-sm">الإجمالي الكلي</p>
-                                            <p className="text-4xl font-black">{hasSubscriptionData ? formatCurrency(currentMonthData.revenue.total) : '$0.00'}</p>
+                                            <p className="text-4xl font-black">{formatIqd(currentMonthData.revenue.total)}</p>
+                                            <p className="text-indigo-100 text-xs mt-1">منها متاجر تقديري: {formatIqd(currentMonthData.revenue.storeEstimated)} (أسعار هواوي بلا فواتير موثقة)</p>
                                             <p className="text-indigo-100 text-xs mt-1">{currentMonthData.name} — {currentMonthData.users.newThisMonth} مستخدم جديد</p>
                                         </div>
                                         <i className="fas fa-chart-simple text-6xl text-white/20"></i>
@@ -3451,7 +3620,7 @@ Crash #${crash.id}
                                         📊 سلوك المستخدم — {currentMonthData.name}
                                     </h3>
                                     <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                                        <div className="text-center p-4 bg-amber-50 rounded-xl"><div className="text-2xl font-bold text-amber-600">{currentMonthData.behavior.clickedSubscribe}</div><div className="text-xs text-gray-600 mt-1">ضغط اشتراك</div></div>
+                                        <div className="text-center p-4 bg-amber-50 rounded-xl"><div className="text-2xl font-bold text-amber-600">{currentMonthData.behavior.clickedSubscribe}</div><div className="text-xs text-gray-600 mt-1">ضغط اشتراك <span className="text-[10px] text-gray-400 block">(إجمالي منذ الإطلاق)</span></div></div>
                                         <div className="text-center p-4 bg-blue-50 rounded-xl"><div className="text-2xl font-bold text-blue-600">{currentMonthData.behavior.openedPaymentNoCard}</div><div className="text-xs text-gray-600 mt-1">فتح الدفع</div></div>
                                         <div className="text-center p-4 bg-purple-50 rounded-xl"><div className="text-2xl font-bold text-purple-600">{currentMonthData.behavior.enteredCardNoComplete}</div><div className="text-xs text-gray-600 mt-1">أدخل البطاقة</div></div>
                                         <div className="text-center p-4 bg-emerald-50 rounded-xl"><div className="text-2xl font-bold text-emerald-600">{currentMonthData.behavior.completedPayment}</div><div className="text-xs text-gray-600 mt-1">أكمل الدفع</div></div>
@@ -3523,44 +3692,242 @@ Crash #${crash.id}
 
                         {/* ===== تتبع الدفع ===== */}
                         {activeTab === 'payments' && (
-                            <div className="space-y-4">
-                                {!hasSubscriptionData && (
-                                    <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-amber-800 text-sm">
-                                        <i className="fas fa-info-circle ml-2"></i>
-                                        تفاصيل الدفع ستظهر هنا بعد إضافة حقل <code className="bg-amber-100 px-1 rounded">paymentEvents</code> لمستند المستخدم في Firebase.
-                                    </div>
-                                )}
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                    {stages.map(stage => (
-                                        <div key={stage.key} className="bg-white rounded-2xl shadow-lg overflow-hidden">
-                                            <div className={`bg-gradient-to-r ${stage.color} p-4`}>
-                                                <div className="flex items-center gap-3">
-                                                    <i className={`fas ${stage.icon} text-white text-xl`}></i>
-                                                    <h4 className="font-bold text-white text-base flex-1">{stage.title}</h4>
-                                                    <span className="bg-white/20 px-3 py-1 rounded-full text-white text-sm font-bold">{behaviorData[stage.key]?.length || 0}</span>
-                                                </div>
-                                            </div>
-                                            <div className="p-4 max-h-64 overflow-y-auto">
-                                                {behaviorData[stage.key]?.length > 0
-                                                    ? behaviorData[stage.key].map((item, i) => (
-                                                        <div key={i} className="bg-gray-50 rounded-lg p-3 mb-2 border border-gray-200">
-                                                            <div className="font-mono text-sm font-semibold">{item.email}</div>
-                                                            <div className="text-xs text-gray-500 mt-1">
-                                                                {item.timestamp ? new Date(item.timestamp).toLocaleString('ar-EG') : '—'}
-                                                            </div>
-                                                            {item.plan && <div className="text-xs text-emerald-600 mt-1">الباقة: {item.plan}</div>}
-                                                            {item.reason && <div className="text-xs text-rose-600 mt-1">{item.reason}</div>}
-                                                        </div>
-                                                    ))
-                                                    : <div className="text-center text-gray-400 py-8"><i className="fas fa-inbox text-3xl mb-2 block"></i>لا توجد أحداث مسجلة</div>
-                                                }
-                                            </div>
+                            <div className="space-y-6">
+
+                                {/* مسار الدفع — بيانات حقيقية من حالات زين كاش وأحداث التطبيق */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                                    <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+                                        <div className="bg-gradient-to-r from-amber-400 to-amber-600 p-3 flex items-center gap-2">
+                                            <i className="fas fa-hand-pointer text-white"></i>
+                                            <h4 className="font-bold text-white text-sm flex-1">ضغط زر الاشتراك</h4>
+                                            <span className="bg-white/20 px-2 py-0.5 rounded-full text-white text-xs font-bold">{(dbData.payments.eventsAllTime.purchase_clicked && dbData.payments.eventsAllTime.purchase_clicked.count) || 0}</span>
                                         </div>
-                                    ))}
+                                        <div className="p-3 text-xs text-gray-500">
+                                            عدّاد إجمالي منذ الإطلاق — {(dbData.payments.eventsAllTime.purchase_clicked && dbData.payments.eventsAllTime.purchase_clicked.uniqueUsers) || 0} مستخدم فريد
+                                            {dbData.payments.eventsAllTime.purchase_clicked && Object.keys(dbData.payments.eventsAllTime.purchase_clicked.byPlan || {}).length > 0 && (
+                                                <div className="mt-2 space-y-1">
+                                                    {Object.entries(dbData.payments.eventsAllTime.purchase_clicked.byPlan).slice(0, 6).map(([pid, n]) => (
+                                                        <div key={pid} className="flex justify-between bg-amber-50 rounded px-2 py-1"><span className="font-mono" dir="ltr">{pid}</span><span className="font-bold text-amber-700">{n}</span></div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+                                        <div className="bg-gradient-to-r from-blue-400 to-blue-600 p-3 flex items-center gap-2">
+                                            <i className="fas fa-eye text-white"></i>
+                                            <h4 className="font-bold text-white text-sm flex-1">فتح شاشة الدفع (لم يكمل)</h4>
+                                            <span className="bg-white/20 px-2 py-0.5 rounded-full text-white text-xs font-bold">{(dbData.payments.funnel[selectedMonth]?.opened || []).length}</span>
+                                        </div>
+                                        <div className="p-3 max-h-48 overflow-y-auto">
+                                            {(dbData.payments.funnel[selectedMonth]?.opened || []).length > 0
+                                                ? (dbData.payments.funnel[selectedMonth].opened).map((it, i) => (
+                                                    <div key={i} className="bg-gray-50 rounded-lg p-2 mb-2 border border-gray-200 text-xs">
+                                                        <div className="font-mono font-semibold" dir="ltr">{it.email || '—'}</div>
+                                                        <div className="text-gray-500 mt-0.5">{it.at ? new Date(it.at).toLocaleString('ar-EG') : '—'}{it.plan ? ' — ' + it.plan : ''}</div>
+                                                    </div>
+                                                ))
+                                                : <div className="text-center text-gray-400 py-4 text-xs">لا أحد هذا الشهر</div>}
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+                                        <div className="bg-gradient-to-r from-purple-400 to-purple-600 p-3 flex items-center gap-2">
+                                            <i className="fas fa-credit-card text-white"></i>
+                                            <h4 className="font-bold text-white text-sm flex-1">دخل بيانات الدفع (لم يكتمل)</h4>
+                                            <span className="bg-white/20 px-2 py-0.5 rounded-full text-white text-xs font-bold">{(dbData.payments.funnel[selectedMonth]?.entered || []).length}</span>
+                                        </div>
+                                        <div className="p-3 max-h-48 overflow-y-auto">
+                                            {(dbData.payments.funnel[selectedMonth]?.entered || []).length > 0
+                                                ? (dbData.payments.funnel[selectedMonth].entered).map((it, i) => (
+                                                    <div key={i} className="bg-gray-50 rounded-lg p-2 mb-2 border border-gray-200 text-xs">
+                                                        <div className="font-mono font-semibold" dir="ltr">{it.email || '—'}</div>
+                                                        <div className="text-gray-500 mt-0.5">{it.at ? new Date(it.at).toLocaleString('ar-EG') : '—'}{it.plan ? ' — ' + it.plan : ''}</div>
+                                                    </div>
+                                                ))
+                                                : <div className="text-center text-gray-400 py-4 text-xs">لا أحد هذا الشهر</div>}
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+                                        <div className="bg-gradient-to-r from-emerald-400 to-emerald-600 p-3 flex items-center gap-2">
+                                            <i className="fas fa-check-circle text-white"></i>
+                                            <h4 className="font-bold text-white text-sm flex-1">أكمل الدفع بنجاح</h4>
+                                            <span className="bg-white/20 px-2 py-0.5 rounded-full text-white text-xs font-bold">{(dbData.payments.funnel[selectedMonth]?.completed || []).length}</span>
+                                        </div>
+                                        <div className="p-3 max-h-48 overflow-y-auto">
+                                            {(dbData.payments.funnel[selectedMonth]?.completed || []).length > 0
+                                                ? (dbData.payments.funnel[selectedMonth].completed).map((it, i) => (
+                                                    <div key={i} className="bg-gray-50 rounded-lg p-2 mb-2 border border-gray-200 text-xs">
+                                                        <div className="flex justify-between gap-2">
+                                                            <span className="font-mono font-semibold" dir="ltr">{it.email || '—'}</span>
+                                                            {it.amountIqd ? <span className="font-bold text-emerald-700 whitespace-nowrap">{formatIqd(it.amountIqd)}</span> : null}
+                                                        </div>
+                                                        <div className="text-gray-500 mt-0.5">{it.at ? new Date(it.at).toLocaleString('ar-EG') : '—'}{it.source ? ' — ' + it.source : ''}{it.plan ? ' — ' + it.plan : ''}</div>
+                                                    </div>
+                                                ))
+                                                : <div className="text-center text-gray-400 py-4 text-xs">لا أحد هذا الشهر</div>}
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+                                        <div className="bg-gradient-to-r from-rose-400 to-rose-600 p-3 flex items-center gap-2">
+                                            <i className="fas fa-times-circle text-white"></i>
+                                            <h4 className="font-bold text-white text-sm flex-1">فشل الدفع</h4>
+                                            <span className="bg-white/20 px-2 py-0.5 rounded-full text-white text-xs font-bold">{(dbData.payments.funnel[selectedMonth]?.failed || []).length}</span>
+                                        </div>
+                                        <div className="p-3 max-h-48 overflow-y-auto">
+                                            {(dbData.payments.funnel[selectedMonth]?.failed || []).length > 0
+                                                ? (dbData.payments.funnel[selectedMonth].failed).map((it, i) => (
+                                                    <div key={i} className="bg-gray-50 rounded-lg p-2 mb-2 border border-gray-200 text-xs">
+                                                        <div className="font-mono font-semibold" dir="ltr">{it.email || '—'}</div>
+                                                        <div className="text-gray-500 mt-0.5">{it.at ? new Date(it.at).toLocaleString('ar-EG') : '—'}{it.reason ? ' — ' + it.reason : ''}</div>
+                                                    </div>
+                                                ))
+                                                : <div className="text-center text-gray-400 py-4 text-xs">لا أحد هذا الشهر</div>}
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-indigo-50 rounded-2xl border border-indigo-100 p-4 text-xs text-gray-600 leading-relaxed">
+                                        <div className="font-bold text-indigo-800 mb-1"><i className="fas fa-circle-info ml-1"></i>من أين تأتي هذه الأرقام؟</div>
+                                        «ضغط زر الاشتراك» عدّاد إجمالي يرسله التطبيق نفسه (purchase_clicked). بقية المراحل من دورة دفع زين كاش الفعلية: INITIATING = فتح شاشة الدفع، PENDING دون إتمام = دخل بيانات الدفع، SUCCESS = أكمل، INIT_FAILED = فشل — إضافة إلى إتمامات شراء Google Play وHuawei الموثقة من السيرفر.
+                                    </div>
                                 </div>
+
+                                {/* دفعات زين كاش الحقيقية */}
+                                <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+                                    <div className="bg-gradient-to-r from-purple-600 to-violet-600 p-4">
+                                        <h4 className="font-bold text-white text-lg">
+                                            <i className="fas fa-money-bill-wave ml-2"></i>
+                                            دفعات زين كاش — {dbData.payments.zainCash.length} عملية
+                                        </h4>
+                                        <p className="text-purple-100 text-xs mt-1">سجل حقيقي من مجموعة zainCashPayments: كل عملية دفع فعلية بحالتها ومبلغها</p>
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-right text-sm">
+                                            <thead className="bg-gray-50 text-gray-600 text-xs">
+                                                <tr>
+                                                    <th className="p-3">التاريخ</th>
+                                                    <th className="p-3">الباقة</th>
+                                                    <th className="p-3">المبلغ</th>
+                                                    <th className="p-3">الحالة</th>
+                                                    <th className="p-3">المستخدم</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {dbData.payments.zainCash.length > 0 ? dbData.payments.zainCash.slice(0, 150).map((p, i) => (
+                                                    <tr key={i} className="hover:bg-gray-50">
+                                                        <td className="p-3 text-xs">{p.at ? new Date(p.at).toLocaleString('ar-EG') : '—'}</td>
+                                                        <td className="p-3 font-mono text-xs">{p.planId || '—'}</td>
+                                                        <td className="p-3 font-bold text-purple-700">{formatIqd(p.amountIqd)}</td>
+                                                        <td className="p-3">
+                                                            {p.status === 'SUCCESS'
+                                                                ? <span className="px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold">ناجحة</span>
+                                                                : <span className="px-2 py-1 rounded-full bg-gray-100 text-gray-600 text-xs font-bold">{p.status || '—'}</span>}
+                                                        </td>
+                                                        <td className="p-3 font-mono text-xs" dir="ltr">{p.email || '—'}</td>
+                                                    </tr>
+                                                )) : (
+                                                    <tr><td colSpan={5} className="p-8 text-center text-gray-400"><i className="fas fa-inbox text-3xl mb-2 block"></i>لا توجد دفعات زين كاش بعد</td></tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                {/* اشتراكات المتاجر (Play / Huawei) */}
+                                <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+                                    <div className="bg-gradient-to-r from-emerald-600 to-teal-600 p-4">
+                                        <h4 className="font-bold text-white text-lg">
+                                            <i className="fas fa-store ml-2"></i>
+                                            اشتراكات المتاجر — {dbData.payments.storeStarts.length} اشتراك
+                                        </h4>
+                                        <p className="text-emerald-100 text-xs mt-1">كل اشتراك Google Play أو Huawei موثّق: السعر الموثق من بيانات الشراء، والمقدَّر من كتالوج الباقات (هواوي لا يرسل الأسعار)</p>
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-right text-sm">
+                                            <thead className="bg-gray-50 text-gray-600 text-xs">
+                                                <tr>
+                                                    <th className="p-3">المستخدم</th>
+                                                    <th className="p-3">المتجر</th>
+                                                    <th className="p-3">الخطة</th>
+                                                    <th className="p-3">قيمة الفترة</th>
+                                                    <th className="p-3">بدأ في</th>
+                                                    <th className="p-3">ينتهي في</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {dbData.payments.storeStarts.length > 0 ? dbData.payments.storeStarts.slice(0, 150).map((s, i) => (
+                                                    <tr key={i} className="hover:bg-gray-50">
+                                                        <td className="p-3 font-mono text-xs" dir="ltr">{s.email || '—'}</td>
+                                                        <td className="p-3 text-xs font-bold">{s.source}</td>
+                                                        <td className="p-3 text-xs">{s.plan ? PLAN_NAMES_AR[s.plan] : '—'}</td>
+                                                        <td className="p-3 text-xs font-bold text-emerald-700">
+                                                            {formatIqd(s.priceIqd)} {!s.priceConfirmed && <span className="text-amber-600">(تقديري)</span>}
+                                                        </td>
+                                                        <td className="p-3 text-xs">{s.at ? new Date(s.at).toLocaleDateString('ar-EG') : '—'}</td>
+                                                        <td className="p-3 text-xs">{s.expiresAt ? new Date(s.expiresAt).toLocaleDateString('ar-EG') : '—'}</td>
+                                                    </tr>
+                                                )) : (
+                                                    <tr><td colSpan={6} className="p-8 text-center text-gray-400"><i className="fas fa-inbox text-3xl mb-2 block"></i>لا توجد اشتراكات متاجر بعد</td></tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                {/* المنح والإبطالات الإدارية */}
+                                <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+                                    <div className="bg-gradient-to-r from-amber-500 to-orange-500 p-4">
+                                        <h4 className="font-bold text-white text-lg">
+                                            <i className="fas fa-gift ml-2"></i>
+                                            المنح والإبطالات الإدارية — {dbData.payments.grants.length} عملية
+                                        </h4>
+                                        <p className="text-amber-100 text-xs mt-1">كل ما صدر من لوحة «إدارة اشتراك PRO» أو Firebase Console (مجموعة proGrants)</p>
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-right text-sm">
+                                            <thead className="bg-gray-50 text-gray-600 text-xs">
+                                                <tr>
+                                                    <th className="p-3">التاريخ</th>
+                                                    <th className="p-3">البريد</th>
+                                                    <th className="p-3">العملية</th>
+                                                    <th className="p-3">الأيام</th>
+                                                    <th className="p-3">الحالة</th>
+                                                    <th className="p-3">السبب</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {dbData.payments.grants.length > 0 ? dbData.payments.grants.slice(0, 150).map((g, i) => (
+                                                    <tr key={i} className="hover:bg-gray-50">
+                                                        <td className="p-3 text-xs">{g.at ? new Date(g.at).toLocaleString('ar-EG') : '—'}</td>
+                                                        <td className="p-3 font-mono text-xs" dir="ltr">{g.email || '—'}</td>
+                                                        <td className="p-3 text-xs font-bold">
+                                                            {g.action === 'REVOKE'
+                                                                ? <span className="text-rose-600">إبطال</span>
+                                                                : <span className="text-emerald-700">منح</span>}
+                                                        </td>
+                                                        <td className="p-3 text-xs">{g.days > 0 ? g.days : '—'}</td>
+                                                        <td className="p-3">
+                                                            {g.status === 'PROCESSED'
+                                                                ? <span className="px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold">منفذة</span>
+                                                                : g.status === 'REJECTED'
+                                                                    ? <span className="px-2 py-1 rounded-full bg-rose-100 text-rose-700 text-xs font-bold">مرفوضة</span>
+                                                                    : <span className="px-2 py-1 rounded-full bg-gray-100 text-gray-600 text-xs font-bold">{g.status || '—'}</span>}
+                                                        </td>
+                                                        <td className="p-3 text-xs text-gray-500">{g.reason || '—'}</td>
+                                                    </tr>
+                                                )) : (
+                                                    <tr><td colSpan={6} className="p-8 text-center text-gray-400"><i className="fas fa-inbox text-3xl mb-2 block"></i>لا توجد منح إدارية بعد</td></tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
                             </div>
                         )}
-
                         {/* ===== التحليلات ===== */}
                         {activeTab === 'charts' && (
                             <div className="space-y-6">
@@ -3572,7 +3939,7 @@ Crash #${crash.id}
                                     title="📈 نمو المستخدمين والاشتراكات" />
                                 <ChartComponent type="bar" labels={chartLabels}
                                     data={[{ label: 'الأرباح ($)', data: revenueData, backgroundColor: '#8b5cf6', borderRadius: 8 }]}
-                                    title="💰 إجمالي الأرباح بمرور الوقت" />
+                                    title="💰 إيرادات الاشتراكات بمرور الوقت (د.ع)" />
 
                                 <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl shadow-xl p-6 text-white">
                                     <div className="text-center">
@@ -3585,7 +3952,7 @@ Crash #${crash.id}
                                         </p>
                                         {hasSubscriptionData && (
                                             <p className="text-indigo-200">
-                                                أعلى شهر أرباح: {formatCurrency(Math.max(...revenueData))}
+                                                أعلى شهر أرباح: {formatIqd(Math.max(...revenueData))}
                                             </p>
                                         )}
                                     </div>
@@ -3612,540 +3979,52 @@ Crash #${crash.id}
                         {activeTab === 'integration' && (
                             <div className="space-y-6">
 
-                                {/* رأس الدليل */}
                                 <div className="bg-gradient-to-r from-emerald-600 to-teal-600 rounded-2xl p-6 text-white shadow-xl">
                                     <div className="flex items-center gap-4">
-                                        <div className="bg-white/20 p-4 rounded-2xl"><i className="fas fa-rocket text-3xl"></i></div>
+                                        <div className="bg-white/20 p-4 rounded-2xl"><i className="fas fa-plug-circle-check text-3xl"></i></div>
                                         <div>
-                                            <h2 className="text-2xl font-black">دليل التكامل الكامل مع Firebase</h2>
-                                            <p className="text-emerald-100 mt-1">كل الكود المطلوب لإضافته في Android Studio لتشغيل لوحة التحكم بشكل كامل</p>
-                                            <p className="text-emerald-200 text-xs mt-1">📋 انسخ هذا الدليل وأرسله لـ AI في Android Studio</p>
+                                            <h2 className="text-2xl font-black">التكامل مكتمل ويعمل الآن ✓</h2>
+                                            <p className="text-emerald-100 mt-1">كل الأرقام في هذه اللوحة حقيقية وتُقرأ تلقائياً من السيرفر — لا حاجة لإضافة أي حقول أو كود في التطبيق</p>
                                         </div>
                                     </div>
                                 </div>
 
-                                {/* === القسم 1: هيكل Firebase المطلوب === */}
-                                <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
-                                    <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-4">
-                                        <h3 className="text-white font-black text-lg"><i className="fas fa-database ml-2"></i>القسم 1: هيكل Firebase المطلوب</h3>
-                                        <p className="text-blue-100 text-sm mt-1">المجموعات التي يجب إنشاؤها أو تعديلها في Firestore</p>
-                                    </div>
-                                    <div className="p-6 space-y-6">
-
-                                        {/* مجموعة users */}
-                                        <div>
-                                            <div className="flex items-center gap-3 mb-3">
-                                                <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-sm font-bold">موجودة ✓</span>
-                                                <h4 className="font-black text-gray-800 text-lg">مجموعة: <code className="bg-gray-100 px-2 py-0.5 rounded">users</code></h4>
-                                                <span className="text-gray-400 text-sm">— أضف إليها هذه الحقول الجديدة</span>
-                                            </div>
-                                            <div className="bg-gray-900 rounded-xl p-4 font-mono text-sm overflow-x-auto">
-                                                <div className="text-gray-400">// الحقول الجديدة التي يجب إضافتها لكل مستخدم مشترك</div>
-                                                <div className="text-emerald-400 mt-2">{'{'}</div>
-                                                <div className="mr-4">
-                                                    <div><span className="text-yellow-300">"subscriptionPlan"</span><span className="text-white">: </span><span className="text-cyan-300">"monthly"</span><span className="text-gray-400">  // أو quarterly | semiAnnual | annual</span></div>
-                                                    <div><span className="text-yellow-300">"subscriptionStart"</span><span className="text-white">: </span><span className="text-cyan-300">Timestamp</span><span className="text-gray-400">  // تاريخ بدء الاشتراك</span></div>
-                                                    <div><span className="text-yellow-300">"subscriptionEnd"</span><span className="text-white">: </span><span className="text-cyan-300">Timestamp</span><span className="text-gray-400">   // تاريخ انتهاء الاشتراك</span></div>
-                                                    <div><span className="text-yellow-300">"isSubscriber"</span><span className="text-white">: </span><span className="text-cyan-300">true</span><span className="text-gray-400">         // boolean</span></div>
-                                                    <div><span className="text-yellow-300">"subscriptionStatus"</span><span className="text-white">: </span><span className="text-cyan-300">"active"</span><span className="text-gray-400">  // أو expired | cancelled</span></div>
-                                                </div>
-                                                <div className="text-emerald-400">{'}'}</div>
-                                            </div>
+                                <div className="bg-white rounded-2xl shadow-xl p-6">
+                                    <h3 className="font-black text-gray-800 text-lg mb-4"><i className="fas fa-database text-blue-600 ml-2"></i>من أين تأتي كل بيانات اللوحة؟</h3>
+                                    <div className="space-y-3 text-sm">
+                                        <div className="p-4 bg-purple-50 rounded-xl border border-purple-100">
+                                            <div className="font-bold text-purple-800 mb-1">proEntitlements — الاشتراكات والأرباح والمشتركون</div>
+                                            <div className="text-gray-600 leading-relaxed">مستند لكل مشترك يكتبه السيرفر فقط بعد التحقق من المتجر (Google Play / Huawei / زين كاش) أو بعد منح إداري. يحمل: نوع الخطة (productId)، تاريخ البداية والانتهاء، وسيلة الدفع (provider)، والسعر الموثق من المتجر (display.priceAmountMicros). منه تُحسب: المشتركون النشطون، توزيع الخطط، وإيراد «أول فترة» لكل اشتراك متجر.</div>
                                         </div>
-
-                                        {/* مجموعة paymentEvents */}
-                                        <div>
-                                            <div className="flex items-center gap-3 mb-3">
-                                                <span className="bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-sm font-bold">جديدة ★</span>
-                                                <h4 className="font-black text-gray-800 text-lg">مجموعة: <code className="bg-gray-100 px-2 py-0.5 rounded">paymentEvents</code></h4>
-                                                <span className="text-gray-400 text-sm">— أنشئها جديداً لتتبع سلوك الدفع</span>
-                                            </div>
-                                            <p className="text-gray-500 text-sm mb-3">كل مستند = حدث واحد (ضغطة زر، فتح الدفع، إتمام الدفع...)</p>
-                                            <div className="bg-gray-900 rounded-xl p-4 font-mono text-sm overflow-x-auto">
-                                                <div className="text-gray-400">// مثال مستند في مجموعة paymentEvents</div>
-                                                <div className="text-emerald-400 mt-2">{'{'}</div>
-                                                <div className="mr-4">
-                                                    <div><span className="text-yellow-300">"userId"</span><span className="text-white">: </span><span className="text-cyan-300">"abc123uid"</span><span className="text-gray-400">           // FirebaseAuth.currentUser.uid</span></div>
-                                                    <div><span className="text-yellow-300">"userEmail"</span><span className="text-white">: </span><span className="text-cyan-300">"user@gmail.com"</span><span className="text-gray-400">       // FirebaseAuth.currentUser.email</span></div>
-                                                    <div><span className="text-yellow-300">"eventType"</span><span className="text-white">: </span><span className="text-cyan-300">"clickedSubscribe"</span><span className="text-gray-400">    // نوع الحدث (انظر القائمة أدناه)</span></div>
-                                                    <div><span className="text-yellow-300">"plan"</span><span className="text-white">: </span><span className="text-cyan-300">"monthly"</span><span className="text-gray-400">               // الخطة التي اختارها</span></div>
-                                                    <div><span className="text-yellow-300">"amount"</span><span className="text-white">: </span><span className="text-cyan-300">29.99</span><span className="text-gray-400">                  // السعر بالدولار</span></div>
-                                                    <div><span className="text-yellow-300">"timestamp"</span><span className="text-white">: </span><span className="text-cyan-300">FieldValue.serverTimestamp()</span></div>
-                                                    <div><span className="text-yellow-300">"month"</span><span className="text-white">: </span><span className="text-cyan-300">"2026-06"</span><span className="text-gray-400">               // yyyy-MM للفلترة السهلة</span></div>
-                                                    <div><span className="text-yellow-300">"failureReason"</span><span className="text-white">: </span><span className="text-cyan-300">"card_declined"</span><span className="text-gray-400">   // فقط عند الفشل</span></div>
-                                                    <div><span className="text-yellow-300">"transactionId"</span><span className="text-white">: </span><span className="text-cyan-300">"txn_abc123"</span><span className="text-gray-400">      // فقط عند النجاح</span></div>
-                                                </div>
-                                                <div className="text-emerald-400">{'}'}</div>
-                                            </div>
-                                            <div className="mt-3 bg-blue-50 rounded-xl p-4">
-                                                <p className="font-bold text-blue-800 text-sm mb-2">📋 قيم eventType المسموح بها:</p>
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                                    {[
-                                                        ['clickedSubscribe', 'ضغط زر الاشتراك ولم يفتح شاشة الدفع'],
-                                                        ['openedPayment', 'فتح شاشة الدفع ولم يدخل بيانات البطاقة'],
-                                                        ['enteredCard', 'أدخل بيانات البطاقة ولم يضغط تأكيد'],
-                                                        ['completedPayment', 'أكمل الدفع بنجاح'],
-                                                        ['failedPayment', 'فشل الدفع لأي سبب']
-                                                    ].map(([key, desc]) => (
-                                                        <div key={key} className="flex items-start gap-2 bg-white rounded-lg p-2">
-                                                            <code className="text-purple-700 font-bold text-xs whitespace-nowrap">{key}</code>
-                                                            <span className="text-gray-600 text-xs">{desc}</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
+                                        <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100">
+                                            <div className="font-bold text-emerald-800 mb-1">zainCashPayments — تتبع الدفعات الموثقة</div>
+                                            <div className="text-gray-600 leading-relaxed">كل عملية دفع زين كاش بحالتها (INITIATING / SUCCESS / ...) ومبلغها الفعلي بالدينار وتاريخ تفعيلها. منها وحدها يُحسب الإيراد «الموثوق» في اللوحة — لا تقديرات.</div>
                                         </div>
-
-                                        {/* مجموعة adRevenue */}
-                                        <div>
-                                            <div className="flex items-center gap-3 mb-3">
-                                                <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-sm font-bold">جديدة ★</span>
-                                                <h4 className="font-black text-gray-800 text-lg">مجموعة: <code className="bg-gray-100 px-2 py-0.5 rounded">adRevenue</code></h4>
-                                                <span className="text-gray-400 text-sm">— لتتبع أرباح الإعلانات</span>
-                                            </div>
-                                            <p className="text-gray-500 text-sm mb-3">كل مستند = يوم واحد — ID المستند: <code className="bg-gray-100 px-1 rounded">yyyy-MM-dd</code></p>
-                                            <div className="bg-gray-900 rounded-xl p-4 font-mono text-sm overflow-x-auto">
-                                                <div className="text-gray-400">// مثال: adRevenue/2026-06-10</div>
-                                                <div className="text-emerald-400 mt-2">{'{'}</div>
-                                                <div className="mr-4">
-                                                    <div><span className="text-yellow-300">"date"</span><span className="text-white">: </span><span className="text-cyan-300">"2026-06-10"</span></div>
-                                                    <div><span className="text-yellow-300">"month"</span><span className="text-white">: </span><span className="text-cyan-300">"2026-06"</span></div>
-                                                    <div><span className="text-yellow-300">"revenue"</span><span className="text-white">: </span><span className="text-cyan-300">45.30</span><span className="text-gray-400">  // إجمالي أرباح اليوم بالدولار</span></div>
-                                                    <div><span className="text-yellow-300">"impressions"</span><span className="text-white">: </span><span className="text-cyan-300">12500</span><span className="text-gray-400">  // عدد مشاهدات الإعلانات</span></div>
-                                                    <div><span className="text-yellow-300">"clicks"</span><span className="text-white">: </span><span className="text-cyan-300">340</span><span className="text-gray-400">     // عدد النقرات</span></div>
-                                                    <div><span className="text-yellow-300">"source"</span><span className="text-white">: </span><span className="text-cyan-300">"admob"</span><span className="text-gray-400">  // مصدر الإعلانات</span></div>
-                                                </div>
-                                                <div className="text-emerald-400">{'}'}</div>
-                                            </div>
-                                            <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-4">
-                                                <p className="text-amber-800 text-sm"><i className="fas fa-lightbulb ml-1 text-amber-500"></i>
-                                                    <strong>ملاحظة AdMob:</strong> AdMob لا يسمح بقراءة الأرباح مباشرة من التطبيق. الحل: أضف الأرباح يدوياً من لوحة AdMob، أو استخدم AdMob Reporting API مع Firebase Cloud Functions لجلبها تلقائياً كل يوم.</p>
-                                            </div>
+                                        <div className="p-4 bg-amber-50 rounded-xl border border-amber-100">
+                                            <div className="font-bold text-amber-800 mb-1">proGrants — المنح والإبطالات الإدارية</div>
+                                            <div className="text-gray-600 leading-relaxed">طابور أوامر «إدارة اشتراك PRO» في تبويب المستخدمين: منح مجاني بعدد أيام أو إبطال فوري، مع نتيجة التنفيذ. المنح المجاني لا يُحتسب ضمن الأرباح.</div>
                                         </div>
-
-                                        {/* مجموعة pageViews */}
-                                        <div className="border-t pt-6">
-                                            <div className="flex items-center gap-3 mb-3">
-                                                <span className="bg-purple-100 text-purple-700 px-3 py-1 rounded-full text-sm font-bold">جديدة +</span>
-                                                <h4 className="font-black text-gray-800 text-lg">مجموعة: <code className="bg-gray-100 px-2 py-0.5 rounded">pageViews</code></h4>
-                                                <span className="text-gray-400 text-sm">— لتتبع زيارات الصفحات ونشاط المستخدمين</span>
-                                            </div>
-                                            <p className="text-gray-500 text-sm mb-3">كل مستند = شاشة/صفحة واحدة — معرف المستند (Document ID) هو معرّف الصفحة (مثل levels, profile, stats...):</p>
-                                            <div className="bg-gray-900 rounded-xl p-4 font-mono text-sm overflow-x-auto">
-                                                <div className="text-gray-400">// هيكل مجموعة pageViews — كل مستند = صفحة واحدة</div>
-                                                <div className="text-emerald-400 mt-2">{'{'}</div>
-                                                <div className="mr-4">
-                                                    <div><span className="text-yellow-300">"page"</span><span className="text-white">: </span><span className="text-cyan-300">"levels"</span><span className="text-gray-400">  // معرف الصفحة (مفتاح الصفحة)</span></div>
-                                                    <div><span className="text-yellow-300">"views"</span><span className="text-white">: </span><span className="text-cyan-300">4820</span><span className="text-gray-400">  // إجمالي عدد المشاهدات للصفحة</span></div>
-                                                    <div><span className="text-yellow-300">"uniqueUsers"</span><span className="text-white">: </span><span className="text-cyan-300">1240</span><span className="text-gray-400">  // عدد المستخدمين الفريدين الذين زاروا الصفحة</span></div>
-                                                    <div><span className="text-yellow-300">"userIds"</span><span className="text-white">: </span><span className="text-cyan-300">["uid1", "uid2", ...]</span><span className="text-gray-400"> // قائمة معرفات المستخدمين (أقصى 1000 لتوفير المساحة)</span></div>
-                                                </div>
-                                                <div className="text-emerald-400">{'}'}</div>
-                                            </div>
+                                        <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
+                                            <div className="font-bold text-blue-800 mb-1">users + reports + pageViews — المستخدمون والتقارير والنشاط</div>
+                                            <div className="text-gray-600 leading-relaxed">حسابات التطبيق وتذاكر الدعم ومشاهدات الشاشات — كما كانت تعمل سابقاً.</div>
                                         </div>
                                     </div>
                                 </div>
 
-                                {/* === القسم 2: كود Kotlin === */}
-                                <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
-                                    <div className="bg-gradient-to-r from-purple-600 to-pink-600 p-4">
-                                        <h3 className="text-white font-black text-lg"><i className="fab fa-android ml-2"></i>القسم 2: كود Kotlin للتطبيق</h3>
-                                        <p className="text-purple-100 text-sm mt-1">انسخ هذا الكود وأضفه في Android Studio</p>
-                                    </div>
-                                    <div className="p-6 space-y-6">
-
-                                        {/* كلاس SubscriptionManager */}
-                                        <div>
-                                            <h4 className="font-black text-gray-800 mb-2">📁 أنشئ ملف: <code className="bg-purple-50 text-purple-700 px-2 py-0.5 rounded">SubscriptionManager.kt</code></h4>
-                                            <div className="bg-gray-900 rounded-xl p-4 font-mono text-xs overflow-x-auto leading-relaxed">
-                                                <pre className="text-gray-100 whitespace-pre">{`import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.FieldValue
-import java.text.SimpleDateFormat
-import java.util.*
-
-object SubscriptionManager {
-
-    private val db = FirebaseFirestore.getInstance()
-    private val auth = FirebaseAuth.getInstance()
-    private val monthFormat = SimpleDateFormat("yyyy-MM", Locale.US)
-
-    // ====================================================
-    // 1. احفظ بيانات الاشتراك عند نجاح الدفع
-    // ====================================================
-    fun saveSubscription(
-        plan: String,          // "monthly" | "quarterly" | "semiAnnual" | "annual"
-        startDate: Date,       // تاريخ بدء الاشتراك
-        endDate: Date,         // تاريخ الانتهاء
-        transactionId: String  // معرف المعاملة من مزود الدفع
-    ) {
-        val uid = auth.currentUser?.uid ?: return
-        val email = auth.currentUser?.email ?: ""
-
-        // 1.a حدّث مستند المستخدم في مجموعة users
-        val userUpdates = mapOf(
-            "subscriptionPlan"   to plan,
-            "subscriptionStart"  to com.google.firebase.Timestamp(startDate),
-            "subscriptionEnd"    to com.google.firebase.Timestamp(endDate),
-            "isSubscriber"       to true,
-            "subscriptionStatus" to "active"
-        )
-        db.collection("users").document(uid).update(userUpdates)
-
-        // 1.b سجّل حدث completedPayment
-        logPaymentEvent(
-            eventType     = "completedPayment",
-            plan          = plan,
-            amount        = getPlanPrice(plan),
-            transactionId = transactionId
-        )
-    }
-
-    // ====================================================
-    // 2. سجّل حدث دفع (استدعه في كل خطوة)
-    // ====================================================
-    fun logPaymentEvent(
-        eventType: String,
-        plan: String? = null,
-        failureReason: String? = null,
-        amount: Double? = null,
-        transactionId: String? = null
-    ) {
-        val uid   = auth.currentUser?.uid   ?: "anonymous"
-        val email = auth.currentUser?.email ?: "anonymous"
-
-        val event = hashMapOf<String, Any>(
-            "userId"    to uid,
-            "userEmail" to email,
-            "eventType" to eventType,
-            "timestamp" to FieldValue.serverTimestamp(),
-            "month"     to monthFormat.format(Date())
-        )
-        plan?.let          { event["plan"]          = it }
-        failureReason?.let { event["failureReason"] = it }
-        amount?.let        { event["amount"]        = it }
-        transactionId?.let { event["transactionId"] = it }
-
-        db.collection("paymentEvents").add(event)
-    }
-
-    // ====================================================
-    // 3. ألغِ الاشتراك (عند انتهائه أو الإلغاء)
-    // ====================================================
-    fun cancelSubscription() {
-        val uid = auth.currentUser?.uid ?: return
-        val updates = mapOf(
-            "isSubscriber"       to false,
-            "subscriptionStatus" to "cancelled"
-        )
-        db.collection("users").document(uid).update(updates)
-    }
-
-    // ====================================================
-    // 4. أسعار الخطط (عدّلها حسب أسعارك)
-    // ====================================================
-    private fun getPlanPrice(plan: String): Double = when (plan) {
-        "monthly"    -> 29.99
-        "quarterly"  -> 69.99
-        "semiAnnual" -> 119.99
-        "annual"     -> 199.99
-        else         -> 0.0
-    }
-}`}</pre>
-                                            </div>
-                                        </div>
-
-                                        {/* أين تستدعي الدوال */}
-                                        <div>
-                                            <h4 className="font-black text-gray-800 mb-3">📍 أين تستدعي كل دالة في التطبيق:</h4>
-                                            <div className="space-y-3">
-                                                {[
-                                                    {
-                                                        event: 'clickedSubscribe',
-                                                        color: 'amber',
-                                                        where: 'عند الضغط على زر "اشترك الآن" قبل فتح شاشة الدفع',
-                                                        code: 'SubscriptionManager.logPaymentEvent("clickedSubscribe", plan = selectedPlan)'
-                                                    },
-                                                    {
-                                                        event: 'openedPayment',
-                                                        color: 'blue',
-                                                        where: 'عند فتح شاشة الدفع / نافذة إدخال بيانات البطاقة',
-                                                        code: 'SubscriptionManager.logPaymentEvent("openedPayment", plan = selectedPlan)'
-                                                    },
-                                                    {
-                                                        event: 'enteredCard',
-                                                        color: 'purple',
-                                                        where: 'عند تغيير أي حقل في نموذج البطاقة (TextWatcher)',
-                                                        code: 'SubscriptionManager.logPaymentEvent("enteredCard", plan = selectedPlan)'
-                                                    },
-                                                    {
-                                                        event: 'completedPayment',
-                                                        color: 'emerald',
-                                                        where: 'في callback نجاح الدفع من مزود الدفع',
-                                                        code: 'SubscriptionManager.saveSubscription(plan, startDate, endDate, txnId)'
-                                                    },
-                                                    {
-                                                        event: 'failedPayment',
-                                                        color: 'rose',
-                                                        where: 'في callback فشل الدفع من مزود الدفع',
-                                                        code: 'SubscriptionManager.logPaymentEvent("failedPayment", plan = selectedPlan, failureReason = error.message)'
-                                                    }
-                                                ].map(item => (
-                                                    <div key={item.event} className={`border-r-4 border-${item.color}-400 bg-${item.color}-50 rounded-xl p-4`}>
-                                                        <div className="flex items-center gap-2 mb-1">
-                                                            <code className={`text-${item.color}-700 font-bold text-sm`}>{item.event}</code>
-                                                        </div>
-                                                        <p className="text-gray-600 text-sm mb-2"><i className="fas fa-map-marker-alt ml-1 text-gray-400"></i>{item.where}</p>
-                                                        <div className="bg-gray-900 rounded-lg p-2 font-mono text-xs text-emerald-300 overflow-x-auto">{item.code}</div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        {/* مثال تطبيق كامل */}
-                                        <div>
-                                            <h4 className="font-black text-gray-800 mb-2">🔧 مثال تطبيق كامل في Activity/Fragment:</h4>
-                                            <div className="bg-gray-900 rounded-xl p-4 font-mono text-xs overflow-x-auto leading-relaxed">
-                                                <pre className="text-gray-100 whitespace-pre">{`// في SubscriptionActivity.kt
-
-class SubscriptionActivity : AppCompatActivity() {
-
-    private var selectedPlan = "monthly"
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
-        // عند الضغط على زر الاشتراك
-        btnSubscribe.setOnClickListener {
-            // ★ الحدث 1: ضغط الزر
-            SubscriptionManager.logPaymentEvent(
-                eventType = "clickedSubscribe",
-                plan = selectedPlan
-            )
-            openPaymentScreen()
-        }
-    }
-
-    private fun openPaymentScreen() {
-        // ★ الحدث 2: فتح شاشة الدفع
-        SubscriptionManager.logPaymentEvent(
-            eventType = "openedPayment",
-            plan = selectedPlan
-        )
-        // افتح شاشة الدفع هنا...
-    }
-
-    // في TextWatcher لحقول البطاقة:
-    private val cardWatcher = object : TextWatcher {
-        private var hasLogged = false
-        override fun afterTextChanged(s: Editable?) {
-            if (!hasLogged && s?.isNotEmpty() == true) {
-                hasLogged = true
-                // ★ الحدث 3: إدخال بيانات البطاقة
-                SubscriptionManager.logPaymentEvent(
-                    eventType = "enteredCard",
-                    plan = selectedPlan
-                )
-            }
-        }
-        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-    }
-
-    // Callback من مزود الدفع (مثل Stripe / RevenueCat)
-    private fun onPaymentSuccess(transactionId: String) {
-        val calendar = Calendar.getInstance()
-        val startDate = calendar.time
-        when (selectedPlan) {
-            "monthly"    -> calendar.add(Calendar.MONTH, 1)
-            "quarterly"  -> calendar.add(Calendar.MONTH, 3)
-            "semiAnnual" -> calendar.add(Calendar.MONTH, 6)
-            "annual"     -> calendar.add(Calendar.YEAR,  1)
-        }
-        val endDate = calendar.time
-
-        // ★ الحدث 4: إتمام الدفع + حفظ الاشتراك
-        SubscriptionManager.saveSubscription(
-            plan          = selectedPlan,
-            startDate     = startDate,
-            endDate       = endDate,
-            transactionId = transactionId
-        )
-    }
-
-    private fun onPaymentFailed(error: Exception) {
-        // ★ الحدث 5: فشل الدفع
-        SubscriptionManager.logPaymentEvent(
-            eventType     = "failedPayment",
-            plan          = selectedPlan,
-            failureReason = error.message ?: "unknown_error"
-        )
-    }
-}`}</pre>
-                                            </div>
-                                        </div>
+                                <div className="bg-white rounded-2xl shadow-xl p-6">
+                                    <h3 className="font-black text-gray-800 text-lg mb-3"><i className="fas fa-scale-balanced text-teal-600 ml-2"></i>كيف تُحسب الأرباح؟ (شفافية كاملة)</h3>
+                                    <div className="space-y-2 text-sm text-gray-600">
+                                        <div className="p-3 bg-gray-50 rounded-lg"><strong className="text-emerald-700">موثوق 100%:</strong> دفعات زين كاش بحالة SUCCESS فقط — مبلغ فعلي من بوابة الدفع.</div>
+                                        <div className="p-3 bg-gray-50 rounded-lg"><strong className="text-blue-700">موثوق من المتجر:</strong> اشتراكات Google Play — سعر الفترة الأولى كما أرسله Play في بيانات الشراء (priceAmountMicros). تجديدات شهرية لاحقة لا تظهر كمباليع منفصلة لأن Play لا يفصح عن تاريخ كل تجديد للتطبيق.</div>
+                                        <div className="p-3 bg-gray-50 rounded-lg"><strong className="text-amber-700">تقديري:</strong> اشتراكات Huawei — بيانات شراء Huawei لا تتضمن الأسعار، فتُقدَّر من كتالوج الباقات (25,000 / 69,000 / 134,000 / 242,000 د.ع) وتُوسَم بـ«تقديري» في كل مكان.</div>
+                                        <div className="p-3 bg-gray-50 rounded-lg"><strong>غير محسوب هنا:</strong> أرباح AdMob — تُدار من تبويب «أرباح AdMob»، ولا تُضاف أي قيمة إعلانية تقديرية إلى الإجماليات.</div>
                                     </div>
                                 </div>
 
-                                {/* === القسم 3: أرباح الإعلانات === */}
-                                <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
-                                    <div className="bg-gradient-to-r from-orange-500 to-amber-500 p-4">
-                                        <h3 className="text-white font-black text-lg"><i className="fas fa-ad ml-2"></i>القسم 3: تتبع أرباح الإعلانات (AdMob)</h3>
-                                    </div>
-                                    <div className="p-6 space-y-4">
-                                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                                            <p className="font-bold text-amber-800 mb-2">⚠️ قيود AdMob المهمة:</p>
-                                            <p className="text-amber-700 text-sm">AdMob لا يوفر API مباشر للتطبيق لقراءة الأرباح. هناك 3 خيارات:</p>
-                                        </div>
-                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                            {[
-                                                {
-                                                    title: 'الخيار 1 (موصى به)',
-                                                    icon: 'fa-cloud-upload-alt',
-                                                    color: 'emerald',
-                                                    desc: 'تتبع الانطباعات (Impressions) من التطبيق وحساب الأرباح تلقائياً بناءً على eCPM المتوسط.',
-                                                    code: '// في AdMob Listener:\nonAdImpression {\n  AdRevenueTracker.logImpression()\n}'
-                                                },
-                                                {
-                                                    title: 'الخيار 2',
-                                                    icon: 'fa-edit',
-                                                    color: 'blue',
-                                                    desc: 'أدخل أرباح الإعلانات يدوياً كل يوم أو أسبوع من لوحة AdMob في مجموعة adRevenue.',
-                                                    code: '// من الموقع أو Firebase Console\nadRevenue/2026-06-10: {\n  revenue: 45.30\n}'
-                                                },
-                                                {
-                                                    title: 'الخيار 3 (متقدم)',
-                                                    icon: 'fa-cogs',
-                                                    color: 'purple',
-                                                    desc: 'استخدم AdMob Reporting API مع Firebase Cloud Functions لجلب الأرباح تلقائياً كل 24 ساعة.',
-                                                    code: '// Cloud Function مجدولة\nscheduled.every 24h:\n  fetchAdMobAPI()\n  saveToFirestore()'
-                                                }
-                                            ].map((opt, i) => (
-                                                <div key={i} className={`border border-${opt.color}-200 bg-${opt.color}-50 rounded-xl p-4`}>
-                                                    <div className={`w-10 h-10 bg-${opt.color}-500 rounded-xl flex items-center justify-center mb-3`}>
-                                                        <i className={`fas ${opt.icon} text-white`}></i>
-                                                    </div>
-                                                    <h5 className={`font-black text-${opt.color}-800 mb-2`}>{opt.title}</h5>
-                                                    <p className="text-gray-600 text-xs mb-3">{opt.desc}</p>
-                                                    <div className="bg-gray-900 rounded-lg p-2 font-mono text-xs text-emerald-300 whitespace-pre">{opt.code}</div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                        <div>
-                                            <h4 className="font-black text-gray-800 mb-2">كود Kotlin لتتبع الانطباعات (الخيار 1):</h4>
-                                            <div className="bg-gray-900 rounded-xl p-4 font-mono text-xs overflow-x-auto leading-relaxed">
-                                                <pre className="text-gray-100 whitespace-pre">{`// أضف هذا في كل مكان تعرض فيه إعلان AdMob
-
-object AdRevenueTracker {
-    private val db = FirebaseFirestore.getInstance()
-    private val dateFormat  = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-    private val monthFormat = SimpleDateFormat("yyyy-MM",    Locale.US)
-
-    fun logImpression(estimatedRevenue: Double = 0.002) {
-        // estimatedRevenue = eCPM المتوسط ÷ 1000
-        // اضبطه حسب eCPM الفعلي من لوحة AdMob
-        val today = dateFormat.format(Date())
-        val month = monthFormat.format(Date())
-
-        val docRef = db.collection("adRevenue").document(today)
-        db.runTransaction { tx ->
-            val snap = tx.get(docRef)
-            val current = snap.getDouble("revenue") ?: 0.0
-            val impressions = snap.getLong("impressions") ?: 0L
-            tx.set(docRef, mapOf(
-                "date"        to today,
-                "month"       to month,
-                "revenue"     to current + estimatedRevenue,
-                "impressions" to impressions + 1,
-                "source"      to "admob"
-            ))
-        }
-    }
-}
-
-// الاستخدام في BannerAd:
-banner.adListener = object : AdListener() {
-    override fun onAdImpression() {
-        AdRevenueTracker.logImpression()
-    }
-}
-
-// الاستخدام في RewardedAd:
-rewardedAd?.show(this) { rewardItem ->
-    AdRevenueTracker.logImpression(estimatedRevenue = 0.02) // Rewarded أعلى eCPM
-}`}</pre>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* === القسم 4: قواعد Firestore Security === */}
-                                <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
-                                    <div className="bg-gradient-to-r from-red-600 to-rose-600 p-4">
-                                        <h3 className="text-white font-black text-lg"><i className="fas fa-shield-alt ml-2"></i>القسم 4: قواعد أمان Firestore</h3>
-                                        <p className="text-red-100 text-sm mt-1">أضف هذه القواعد في Firebase Console → Firestore → Rules</p>
-                                    </div>
-                                    <div className="p-6">
-                                        <div className="bg-gray-900 rounded-xl p-4 font-mono text-xs overflow-x-auto leading-relaxed">
-                                            <pre className="text-gray-100 whitespace-pre">{`rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-
-    // مجموعة users: كل مستخدم يقرأ/يكتب بياناته فقط
-    match /users/{userId} {
-      allow read, write: if request.auth != null
-                         && request.auth.uid == userId;
-    }
-
-    // مجموعة paymentEvents: المستخدم يكتب فقط
-    // القراءة للأدمن فقط عبر Admin SDK
-    match /paymentEvents/{docId} {
-      allow create: if request.auth != null
-                    && request.resource.data.userId == request.auth.uid;
-      allow read:   if false; // Admin SDK فقط
-    }
-
-    // مجموعة adRevenue: التطبيق يكتب، الأدمن يقرأ
-    match /adRevenue/{docId} {
-      allow write: if request.auth != null;
-      allow read:  if false; // Admin SDK فقط
-    }
-
-    // مجموعة pageViews: التطبيق يكتب (تسجيل)، واللوحة تقرأ
-    match /pageViews/{pageId} {
-      allow read, write: if request.auth != null;
-    }
-  }
-}`}</pre>
-                                        </div>
-                                        <div className="mt-4 bg-red-50 border border-red-200 rounded-xl p-4">
-                                            <p className="text-red-800 text-sm"><i className="fas fa-exclamation-triangle ml-1"></i>
-                                                <strong>ملاحظة:</strong> الموقع (لوحة التحكم) يقرأ البيانات عبر Firebase Admin SDK (من خلال السكريبت الموجود في script.js الذي يملك صلاحيات المشرف). لذلك قواعد <code className="bg-red-100 px-1 rounded">allow read: if false</code> لا تمنع الموقع من القراءة.</p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* === القسم 5: ملخص خطوات التطبيق === */}
-                                <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-2xl p-6 text-white shadow-xl">
-                                    <h3 className="font-black text-xl mb-5"><i className="fas fa-list-check ml-2"></i>ملخص: الخطوات المطلوبة بالترتيب</h3>
-                                    <div className="space-y-3">
-                                        {[
-                                            { step: '1', title: 'أنشئ ملف SubscriptionManager.kt', desc: 'والصق فيه الكود من القسم 2 أعلاه', icon: 'fa-file-code' },
-                                            { step: '2', title: 'أضف مستدعيات logPaymentEvent', desc: 'في كل نقطة من مسار الدفع (5 نقاط كما في القسم 2)', icon: 'fa-code-branch' },
-                                            { step: '3', title: 'استدعِ saveSubscription عند نجاح الدفع', desc: 'مع تمرير plan, startDate, endDate, transactionId', icon: 'fa-check-circle' },
-                                            { step: '4', title: 'أضف AdRevenueTracker.kt', desc: 'واستدعِ logImpression() في كل AdListener', icon: 'fa-ad' },
-                                            { step: '5', title: 'حدّث قواعد Firestore', desc: 'من Firebase Console → Firestore → Rules', icon: 'fa-shield-alt' },
-                                            { step: '6', title: 'انتظر أول تفاعل حقيقي', desc: 'ستظهر البيانات في لوحة التحكم فور تسجيل أول حدث', icon: 'fa-chart-line' }
-                                        ].map(item => (
-                                            <div key={item.step} className="flex items-center gap-4 bg-white/10 rounded-xl p-3">
-                                                <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center font-black text-sm shrink-0">{item.step}</div>
-                                                <i className={`fas ${item.icon} text-indigo-200 text-lg w-5 shrink-0`}></i>
-                                                <div>
-                                                    <p className="font-bold">{item.title}</p>
-                                                    <p className="text-indigo-200 text-xs">{item.desc}</p>
-                                                </div>
-                                            </div>
-                                        ))}
+                                <div className="bg-white rounded-2xl shadow-xl p-6">
+                                    <h3 className="font-black text-gray-800 text-lg mb-3"><i className="fas fa-shield-halved text-rose-600 ml-2"></i>الأمان</h3>
+                                    <div className="text-sm text-gray-600 leading-relaxed">
+                                        هذه المجموعات المالية محجوبة عن التطبيق وعن أي عميل عادي بقواعد Firestore؛ القراءة متاحة حصراً لحساب لوحة الدعم الحامل لادعاء <code className="bg-gray-100 px-1 rounded">admin</code> الصادر من السيرفر، والكتابة تتم فقط عبر Cloud Functions بعد التحقق من المتجر. لا يستطيع مستخدم — حتى بنسخة معدلة من التطبيق — قراءة هذه البيانات أو تزويرها.
                                     </div>
                                 </div>
 
