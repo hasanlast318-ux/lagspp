@@ -26,7 +26,7 @@ const callCloudFunction = async (name, data) => {
     const result = await callable(data);
     return result.data;
 };
-const DASHBOARD_BUILD = '7.16-admin-functions-20260813';
+const DASHBOARD_BUILD = '7.21-overview-restore-20260902';
 console.info(`[LangHub Support] Loaded dashboard build ${DASHBOARD_BUILD}`);
 
 function formatCallableError(error) {
@@ -180,6 +180,8 @@ let notificationsHistoryTabBtn = null;
 let usersSelectionView = null;
 let guestsView = null;
 let notificationsHistoryView = null;
+let proManagementTabBtn = null;
+let proManagementView = null;
 let usersToolsPanel = null;
 let guestsToolsPanel = null;
 let usersPrimaryStatLabel = null;
@@ -327,6 +329,8 @@ function initializeDOMElements() {
     usersSelectionView = document.getElementById('usersSelectionView');
     guestsView = document.getElementById('guestsView');
     notificationsHistoryView = document.getElementById('notificationsHistoryView');
+    proManagementTabBtn = document.getElementById('proManagementTabBtn');
+    proManagementView = document.getElementById('proManagementView');
     usersToolsPanel = document.getElementById('usersToolsPanel');
     guestsToolsPanel = document.getElementById('guestsToolsPanel');
     usersPrimaryStatLabel = document.getElementById('usersPrimaryStatLabel');
@@ -2085,70 +2089,82 @@ function setActiveView(view) {
 }
 
 // إرسال بيانات Firebase الحقيقية للـ iframe عبر postMessage
-function sendDataToDashboard() {
+async function sendDataToDashboard() {
     const iframe = document.getElementById('dashboardIframe');
     if (!iframe || !iframe.contentWindow) return;
-    
-    try {
-        // تحويل بيانات المستخدمين لشكل قابل للإرسال (JSON-safe)
-        const usersData = allUsers.map(u => {
-            const obj = {};
-            Object.keys(u).forEach(k => {
-                const v = u[k];
-                if (v && typeof v === 'object' && typeof v.toMillis === 'function') {
-                    obj[k] = { _type: 'timestamp', millis: v.toMillis() };
-                } else if (v && typeof v === 'object' && v.seconds !== undefined && v.nanoseconds !== undefined) {
-                    obj[k] = { _type: 'timestamp', millis: v.seconds * 1000 };
-                } else if (typeof v !== 'function') {
-                    obj[k] = v;
-                }
-            });
-            return obj;
-        });
-        
-        const appUsersData = appUsers.map(u => {
-            const obj = {};
-            Object.keys(u).forEach(k => {
-                const v = u[k];
-                if (v && typeof v === 'object' && typeof v.toMillis === 'function') {
-                    obj[k] = { _type: 'timestamp', millis: v.toMillis() };
-                } else if (v && typeof v === 'object' && v.seconds !== undefined && v.nanoseconds !== undefined) {
-                    obj[k] = { _type: 'timestamp', millis: v.seconds * 1000 };
-                } else if (typeof v !== 'function') {
-                    obj[k] = v;
-                }
-            });
-            return obj;
-        });
 
-        // تحويل بيانات مشاهدات الشاشات (pageViews) لشكل قابل للإرسال
-        const pageViewsSerialized = (pageViewsData || []).map(pv => {
-            const obj = {};
-            Object.keys(pv).forEach(k => {
-                const v = pv[k];
+    try {
+        // تحويل قيمة Firestore إلى شكل JSON-safe قابل للإرسال
+        const serializeDoc = (id, data) => {
+            const obj = { id: id };
+            Object.keys(data || {}).forEach(k => {
+                const v = (data || {})[k];
                 if (v && typeof v === 'object' && typeof v.toMillis === 'function') {
                     obj[k] = { _type: 'timestamp', millis: v.toMillis() };
-                } else if (v && typeof v === 'object' && v.seconds !== undefined && v.nanoseconds !== undefined) {
+                } else if (v && typeof v === 'object' && v.seconds !== undefined) {
                     obj[k] = { _type: 'timestamp', millis: v.seconds * 1000 };
                 } else if (typeof v !== 'function') {
                     obj[k] = v;
                 }
             });
             return obj;
-        });
-        
+        };
+        const fetchPlain = async (name) => {
+            try {
+                const snap = await getDocs(collection(db(), name));
+                return snap.docs.map(d => serializeDoc(d.id, d.data()));
+            } catch (err) {
+                console.warn('تعذر جلب ' + name + ' للإحصائيات:', err && err.message);
+                return [];
+            }
+        };
+
+        // بيانات الاشتراكات والدفع الحقيقية (قراءة إدمن فقط بحسب القواعد)
+        const [proEntitlements, zainCashPayments, proGrants, proEvents] = await Promise.all([
+            fetchPlain('proEntitlements'),
+            fetchPlain('zainCashPayments'),
+            fetchPlain('proGrants'),
+            fetchPlain('proEvents')
+        ]);
+
+        const serializeUser = (u) => {
+            const obj = {};
+            Object.keys(u).forEach(k => {
+                const v = u[k];
+                if (v && typeof v === 'object' && typeof v.toMillis === 'function') {
+                    obj[k] = { _type: 'timestamp', millis: v.toMillis() };
+                } else if (v && typeof v === 'object' && v.seconds !== undefined) {
+                    obj[k] = { _type: 'timestamp', millis: v.seconds * 1000 };
+                } else if (typeof v !== 'function') {
+                    obj[k] = v;
+                }
+            });
+            return obj;
+        };
+
+        const usersData = allUsers.map(serializeUser);
+        const appUsersData = appUsers.map(serializeUser);
+
+        const pageViewsSerialized = (pageViewsData || []).map(serializeUser);
+
         iframe.contentWindow.postMessage({
             type: 'FIREBASE_DATA',
             users: appUsersData,
             reports: usersData,
-            pageViews: pageViewsSerialized
+            pageViews: pageViewsSerialized,
+            proEntitlements: proEntitlements,
+            zainCashPayments: zainCashPayments,
+            proGrants: proGrants,
+            proEvents: proEvents
         }, '*');
-        
-        console.log('📤 تم إرسال البيانات للوحة الإحصائيات:', appUsersData.length, 'مستخدم،', usersData.length, 'تقرير،', pageViewsSerialized.length, 'مشاهدات صفحة');
+
+        console.log('📤 تم إرسال البيانات للوحة الإحصائيات:', appUsersData.length, 'مستخدم،',
+            proEntitlements.length, 'استحقاق،', zainCashPayments.length, 'دفع زين كاش،', proGrants.length, 'منح');
     } catch (err) {
         console.warn('تعذر إرسال البيانات للـ iframe:', err);
     }
 }
+
 
 function loadUsers() {
     const q = query(collection(db(), COLLECTION_NAME));
@@ -2606,11 +2622,20 @@ function setUsersPanel(panel) {
     if (usersToolsPanel) usersToolsPanel.style.display = isSelection ? '' : 'none';
     if (guestsToolsPanel) guestsToolsPanel.style.display = isGuests ? '' : 'none';
 
+    const isPro = panel === 'pro';
+    if (proManagementView) proManagementView.style.display = isPro ? 'flex' : 'none';
     if (usersSelectionTabBtn) usersSelectionTabBtn.classList.toggle('active', isSelection);
     if (guestUsersTabBtn) guestUsersTabBtn.classList.toggle('active', isGuests);
     if (notificationsHistoryTabBtn) notificationsHistoryTabBtn.classList.toggle('active', isHistory);
+    if (proManagementTabBtn) proManagementTabBtn.classList.toggle('active', isPro);
 
     updateUsersPageStats();
+
+    if (isPro) {
+        stopWatchingSelectedNotification();
+        ensureProSubscribersWatch();
+        return;
+    }
 
     if (isHistory) {
         watchSelectedNotification(selectedNotificationHistoryId);
@@ -5808,6 +5833,13 @@ function initEventListeners() {
     if (usersSelectionTabBtn) usersSelectionTabBtn.addEventListener('click', () => setUsersPanel('selection'));
     if (guestUsersTabBtn) guestUsersTabBtn.addEventListener('click', () => setUsersPanel('guests'));
     if (notificationsHistoryTabBtn) notificationsHistoryTabBtn.addEventListener('click', () => setUsersPanel('history'));
+    if (proManagementTabBtn) proManagementTabBtn.addEventListener('click', () => setUsersPanel('pro'));
+    const proGrantEmailInputEl = document.getElementById('proGrantEmailInput');
+    const proGrantBtnEl = document.getElementById('proGrantBtn');
+    const proRevokeBtnEl = document.getElementById('proRevokeBtn');
+    if (proGrantBtnEl) proGrantBtnEl.addEventListener('click', () => runProGrantAction('GRANT'));
+    if (proRevokeBtnEl) proRevokeBtnEl.addEventListener('click', () => runProGrantAction('REVOKE'));
+    disableBrowserAutofill(proGrantEmailInputEl);
     if (guestsSearchInput) guestsSearchInput.addEventListener('input', renderGuestUsers);
     if (guestsPresenceFilter) guestsPresenceFilter.addEventListener('change', renderGuestUsers);
     if (guestsAppVersionFilter) guestsAppVersionFilter.addEventListener('change', renderGuestUsers);
@@ -6311,6 +6343,261 @@ function closeUpdateModal() {
         modal.style.display = 'none';
     }
     window.removeEventListener('keydown', preventEscapeClose);
+}
+
+// ========== إدارة اشتراك PRO (منح/إبطال) — عبر طابور proGrants الآمن ==========
+// لا تكتب اللوحة الاستحقاق مباشرة أبداً: ترسل طلباً في مجموعة proGrants
+// (تسمح القواعد بإنشائه للإدمن فقط وبحقول محددة) وتتابع مستند الطلب حتى
+// تعالجه دالة processProGrant على السيرفر وتضع النتيجة فيه.
+let proGrantStatusUnsubscribe = null;
+
+function setProStatus(kind, html) {
+    const box = document.getElementById('proGrantStatus');
+    if (!box) return;
+    box.style.display = '';
+    box.className = 'pro-mgmt-status-new pro-mgmt-status-' + kind + '-new';
+    box.innerHTML = html;
+}
+
+function describeProGrantError(code) {
+    if (code === 'USER_NOT_FOUND') return 'البريد غير مسجّل في التطبيق — لم يُحسب له أي اشتراك.';
+    if (code === 'INVALID_EMAIL') return 'صيغة البريد غير صالحة.';
+    if (String(code).indexOf('INVALID_DAYS') === 0) return 'عدد الأيام غير صالح (المسموح 1 إلى 3650).';
+    return 'رُفض الطلب (' + escapeHtml(String(code || 'UNKNOWN')) + ').';
+}
+
+async function runProGrantAction(action) {
+    const emailInputEl = document.getElementById('proGrantEmailInput');
+    const daysInputEl = document.getElementById('proGrantDaysInput');
+    const reasonInputEl = document.getElementById('proGrantReasonInput');
+    const grantBtnEl = document.getElementById('proGrantBtn');
+    const revokeBtnEl = document.getElementById('proRevokeBtn');
+    if (!emailInputEl || !window.addDoc || !window.collection || !window.db) {
+        setProStatus('error', 'لم تكتمل تهيئة الاتصال بالسيرفر. أعد تحميل الصفحة.');
+        return;
+    }
+
+    const email = emailInputEl.value.trim();
+    const reason = reasonInputEl ? reasonInputEl.value.trim() : '';
+    const days = daysInputEl ? Math.floor(Number(daysInputEl.value)) : 0;
+    const adminEmail = (auth() && auth().currentUser && auth().currentUser.email) || 'dashboard-admin';
+
+    const emailRe = new RegExp('^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$');
+    if (!emailRe.test(email)) {
+        setProStatus('error', 'أدخل بريداً إلكترونياً صالحاً أولاً.');
+        return;
+    }
+    if (action === 'GRANT' && (!Number.isInteger(days) || days < 1 || days > 3650)) {
+        setProStatus('error', 'عدد الأيام يجب أن يكون رقماً صحيحاً بين 1 و 3650.');
+        return;
+    }
+
+    if (grantBtnEl) grantBtnEl.disabled = true;
+    if (revokeBtnEl) revokeBtnEl.disabled = true;
+    setProStatus('loading', action === 'GRANT'
+        ? 'جاري منح الاشتراك... تتحقق الدالة الخلفية من الحساب على السيرفر.'
+        : 'جاري إبطال الاشتراك...');
+
+    try {
+        const payload = { email: email, action: action, grantedBy: adminEmail };
+        if (reason) payload.reason = reason;
+        if (action === 'GRANT') payload.days = days;
+        const ref = await addDoc(collection(db(), 'proGrants'), payload);
+        await waitForProGrantResult(ref.id, action, email);
+    } catch (error) {
+        console.error('PRO action failed:', error);
+        const denied = error && (error.code === 'permission-denied' || String(error.message || '').indexOf('permission') !== -1);
+        setProStatus('error', 'فشل إرسال الطلب: ' + escapeHtml(error && error.message ? error.message : 'خطأ غير معروف')
+            + (denied ? '<br><small>هذا الحساب لا يحمل صلاحية الإدارة (admin) لهذه العملية.</small>' : ''));
+    } finally {
+        if (grantBtnEl) grantBtnEl.disabled = false;
+        if (revokeBtnEl) revokeBtnEl.disabled = false;
+    }
+}
+
+function waitForProGrantResult(grantId, action, email) {
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = () => {
+            if (settled) return;
+            settled = true;
+            if (proGrantStatusUnsubscribe) { proGrantStatusUnsubscribe(); proGrantStatusUnsubscribe = null; }
+            clearTimeout(fallbackTimer);
+            resolve();
+        };
+        const fallbackTimer = setTimeout(() => {
+            if (settled) return;
+            setProStatus('error', 'لم تصل نتيجة المعالجة خلال 30 ثانية. راجع مستند الطلب في Firebase Console (مجموعة proGrants).');
+            finish();
+        }, 30000);
+
+        if (proGrantStatusUnsubscribe) proGrantStatusUnsubscribe();
+        proGrantStatusUnsubscribe = onSnapshot(doc(db(), 'proGrants', grantId), (snap) => {
+            const data = snap.data() || {};
+            if (data.status === 'PROCESSED') {
+                if (action === 'GRANT') {
+                    const until = data.newExpiryMillis
+                        ? new Date(data.newExpiryMillis).toLocaleString('ar', { dateStyle: 'medium', timeStyle: 'short' })
+                        : '';
+                    const verifyNote = data.emailVerified === false
+                        ? '<br><small>تنبيه: بريد هذا الحساب غير موثّق في التطبيق — سيرى المستخدم البرو بعد توثيقه.</small>'
+                        : '';
+                    setProStatus('success', 'تم منح الاشتراك لـ ' + escapeHtml(email) + '.<br>صالح حتى: ' + until + verifyNote);
+                } else {
+                    setProStatus('success', 'تم إبطال اشتراك ' + escapeHtml(email) + ' فوراً.');
+                }
+                finish();
+            } else if (data.status === 'REJECTED') {
+                setProStatus('error', describeProGrantError(data.error));
+                finish();
+            }
+        }, (err) => {
+            setProStatus('error', 'تعذر متابعة نتيجة الطلب: ' + escapeHtml(err && (err.message || err.code) ? (err.message || err.code) : 'خطأ'));
+            finish();
+        });
+    });
+}
+
+// ========== قائمة المشتركين (قراءة مباشرة من proEntitlements للإدمن) ==========
+let proSubsUnsubscribe = null;
+let proSubsBound = false;
+let proSubsCache = [];
+
+function ensureProSubscribersWatch() {
+    if (!proSubsBound) {
+        proSubsBound = true;
+        const searchEl = document.getElementById('proSubsSearchInput');
+        const filterEl = document.getElementById('proSubsFilterSelect');
+        if (searchEl) searchEl.addEventListener('input', renderProSubscribers);
+        if (filterEl) filterEl.addEventListener('change', renderProSubscribers);
+        disableBrowserAutofill(searchEl);
+    }
+    if (proSubsUnsubscribe || !window.onSnapshot || !window.collection || !window.db) return;
+    proSubsUnsubscribe = onSnapshot(collection(db(), 'proEntitlements'), (snap) => {
+        proSubsCache = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+        renderProSubscribers();
+    }, (err) => {
+        proSubsUnsubscribe = null;
+        console.error('proEntitlements listener failed:', err);
+        const body = document.getElementById('proSubsTableBody');
+        if (body) body.innerHTML = '<tr><td colspan="5" class="pro-subs-empty-new">تعذر تحميل المشتركين: '
+            + escapeHtml(err && (err.code || err.message) ? String(err.code || err.message) : 'خطأ')
+            + '<br><small>تأكد أن حسابك يحمل صلاحية الإدارة (admin).</small></td></tr>';
+    });
+}
+
+function proEntitlementActiveNow(ent) {
+    return !!ent && ent.active === true && Number(ent.expiresAtMillis || 0) > Date.now();
+}
+
+function proPlanLabel(ent) {
+    if (ent.provider === 'ADMIN_GRANT') {
+        const d = ent.adminGrant ? Number(ent.adminGrant.days || 0) : 0;
+        return d > 0 ? ('منحة مجانية (' + d + ' يوم)') : 'منحة مجانية';
+    }
+    const pid = String(ent.productId || (ent.display && ent.display.basePlanId) || '').toLowerCase();
+    // النصف سنوي قبل السنوي: معرّف semiannual يحتوي annual أيضاً.
+    if (pid.indexOf('semi') !== -1 || pid.indexOf('half') !== -1 || pid.indexOf('6') !== -1) return 'نصف سنوي';
+    if (pid.indexOf('quarter') !== -1 || pid.indexOf('3') !== -1) return 'ربع سنوي';
+    if (pid.indexOf('year') !== -1 || pid.indexOf('annual') !== -1 || pid.indexOf('12') !== -1) return 'سنوي';
+    if (pid.indexOf('month') !== -1 || pid.indexOf('1') !== -1) return 'شهري';
+    // احتياط: استنتج المدة من تاريخ البداية والنهاية
+    const started = Number((ent.display && ent.display.startedAtMillis) || 0);
+    const expires = Number(ent.expiresAtMillis || 0);
+    if (started > 0 && expires > started) {
+        const months = Math.round((expires - started) / (30 * 86400000));
+        if (months >= 11) return 'سنوي';
+        if (months >= 5) return 'نصف سنوي';
+        if (months >= 2) return 'ربع سنوي';
+        if (months >= 1) return 'شهري';
+    }
+    return pid || 'غير محدد';
+}
+
+function proSourceInfo(ent) {
+    if (ent.provider === 'ADMIN_GRANT') return { text: 'منحة منّا (مجاني)', key: 'admin' };
+    if (ent.provider === 'HUAWEI_IAP') return { text: 'Huawei IAP', key: 'huawei' };
+    if (ent.provider === 'ZAIN_CASH') return { text: 'زين كاش', key: 'zain' };
+    if (ent.purchaseTokenHash || ent.latestOrderId) return { text: 'Google Play', key: 'play' };
+    return { text: 'غير معروف', key: 'unknown' };
+}
+
+function proUserFor(uid) {
+    const list = Array.isArray(appUsers) ? appUsers : [];
+    const u = list.find((x) => x && (x.uid === uid || x.id === uid));
+    if (!u) return null;
+    return {
+        name: u.userName || u.displayName || u.name || u.fullName || '',
+        email: u.userEmail || u.email || u.accountEmail || ''
+    };
+}
+
+function renderProSubscribers() {
+    const body = document.getElementById('proSubsTableBody');
+    if (!body) return;
+    const statsEl = document.getElementById('proSubsStats');
+    const badge = document.getElementById('proSubscribersCount');
+    const searchEl = document.getElementById('proSubsSearchInput');
+    const filterEl = document.getElementById('proSubsFilterSelect');
+    const q = searchEl ? searchEl.value.trim().toLowerCase() : '';
+    const mode = filterEl ? filterEl.value : 'active';
+
+    const all = proSubsCache;
+    const activeList = all.filter(proEntitlementActiveNow);
+    if (badge) badge.textContent = String(activeList.length);
+
+    if (statsEl) {
+        const counts = {};
+        activeList.forEach((e) => {
+            const s = proSourceInfo(e);
+            counts[s.key] = (counts[s.key] || 0) + 1;
+        });
+        statsEl.innerHTML =
+            '<span class="pro-subs-chip-new chip-total">فعّالون: <strong>' + activeList.length + '</strong></span>' +
+            '<span class="pro-subs-chip-new src-play">Google Play: <strong>' + (counts.play || 0) + '</strong></span>' +
+            '<span class="pro-subs-chip-new src-huawei">Huawei: <strong>' + (counts.huawei || 0) + '</strong></span>' +
+            '<span class="pro-subs-chip-new src-zain">زين كاش: <strong>' + (counts.zain || 0) + '</strong></span>' +
+            '<span class="pro-subs-chip-new src-admin">منح مجانية: <strong>' + (counts.admin || 0) + '</strong></span>';
+    }
+
+    let rows = all.filter((e) => mode === 'all' || proEntitlementActiveNow(e));
+    if (q) {
+        rows = rows.filter((e) => {
+            const info = proUserFor(e.uid || e.id);
+            const hay = (((info && (info.name + ' ' + info.email)) || '') + ' ' + (e.uid || e.id)).toLowerCase();
+            return hay.indexOf(q) !== -1;
+        });
+    }
+    rows.sort((a, b) => Number(b.expiresAtMillis || 0) - Number(a.expiresAtMillis || 0));
+
+    body.innerHTML = rows.length ? rows.map((e) => {
+        const info = proUserFor(e.uid || e.id);
+        const name = (info && info.name) || '';
+        const email = (info && info.email) || '';
+        const uid = String(e.uid || e.id || '');
+        let userCell;
+        if (name || email) {
+            userCell = '<div class="pro-subs-user-new"><strong>' + escapeHtml(name || email) + '</strong>'
+                + (name && email ? '<small dir="ltr">' + escapeHtml(email) + '</small>' : '') + '</div>';
+        } else {
+            userCell = '<div class="pro-subs-user-new"><small dir="ltr" title="' + escapeHtml(uid) + '">'
+                + escapeHtml(uid.length > 12 ? uid.slice(0, 12) + '…' : uid) + '</small></div>';
+        }
+        const src = proSourceInfo(e);
+        const active = proEntitlementActiveNow(e);
+        const stateLabel = active ? (e.state === 'GRACE' ? 'سماح' : 'فعّال') : 'منتهي';
+        const renew = active && e.autoRenewing === true ? ' <span class="pro-subs-renew-new">تجديد تلقائي</span>' : '';
+        const expiry = e.expiresAtMillis
+            ? new Date(Number(e.expiresAtMillis)).toLocaleDateString('ar', { dateStyle: 'medium' })
+            : '—';
+        return '<tr>'
+            + '<td>' + userCell + '</td>'
+            + '<td>' + escapeHtml(proPlanLabel(e)) + '</td>'
+            + '<td><span class="pro-subs-src-new src-' + src.key + '">' + src.text + '</span></td>'
+            + '<td><span class="pro-subs-state-new ' + (active ? 'on' : 'off') + '">' + stateLabel + '</span>' + renew + '</td>'
+            + '<td>' + expiry + '</td>'
+            + '</tr>';
+    }).join('') : '<tr><td colspan="5" class="pro-subs-empty-new">لا يوجد' + (mode === 'active' ? ' مشتركون فعّالون' : ' اشتراكات') + '.</td></tr>';
 }
 
 if (document.readyState === 'loading') {
