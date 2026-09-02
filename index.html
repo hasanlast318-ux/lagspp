@@ -32,7 +32,7 @@
             sessionStorage.removeItem('supportDashboardBuildReload');
         })();
     </script>
-    <link rel="stylesheet" href="style.css?v=7.16&t=20260615-inline-expand">
+    <link rel="stylesheet" href="style.css?v=7.21&t=20260902-overview-restore">
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
     <!-- Firebase SDK -->
     <script type="module">
@@ -69,7 +69,7 @@
         
         console.log('🔧 تم تهيئة Firebase بإعدادات محسّنة');
     </script>
-    <script src="script.js?v=7.16&t=20260813-admin-functions"></script>
+    <script src="script.js?v=7.21&t=20260902-overview-restore"></script>
 </head>
 <body>
     <!-- صفحة تسجيل الدخول - تصميم فاخر -->
@@ -568,6 +568,10 @@
                     <span>سجل الإشعارات</span>
                     <small id="notificationsHistoryCount">0</small>
                 </button>
+                <button type="button" class="users-subtab-new" id="proManagementTabBtn">
+                    <span>إدارة اشتراك PRO</span>
+                    <small id="proSubscribersCount">0</small>
+                </button>
             </div>
 
             <div class="users-workspace-new" id="usersSelectionView">
@@ -685,6 +689,84 @@
                 <aside class="notification-history-details-new" id="notificationHistoryDetails">
                     <div class="empty-user-details-new">اختر إشعارًا لعرض مستلميه وتفاصيله.</div>
                 </aside>
+            </div>
+
+            <div class="pro-mgmt-view-new" id="proManagementView" style="display: none;">
+                <div class="pro-mgmt-card-new">
+                    <div class="pro-mgmt-header-new">
+                        <div class="pro-mgmt-header-icon-new">PRO</div>
+                        <div>
+                            <h3>إدارة اشتراك PRO</h3>
+                            <p>منح أو إبطال اشتراك LangHub PRO لأي حساب عبر بريده الإلكتروني. يجب أن يكون البريد مسجلاً في التطبيق، وإلا يُرفض الطلب تلقائياً.</p>
+                        </div>
+                    </div>
+
+                    <div class="pro-mgmt-form-new">
+                        <label class="pro-mgmt-field-new">
+                            <span>البريد الإلكتروني للحساب</span>
+                            <input type="email" id="proGrantEmailInput" dir="ltr" placeholder="student@example.com" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="other">
+                        </label>
+                        <div class="pro-mgmt-row-new">
+                            <label class="pro-mgmt-field-new">
+                                <span>عدد الأيام (للمنح: 1 إلى 3650)</span>
+                                <input type="number" id="proGrantDaysInput" min="1" max="3650" step="1" value="30" dir="ltr" data-lpignore="true" data-1p-ignore data-form-type="other">
+                            </label>
+                            <label class="pro-mgmt-field-new">
+                                <span>السبب (اختياري — للتدقيق)</span>
+                                <input type="text" id="proGrantReasonInput" maxlength="200" placeholder="هدية / تعويض / اختبار" autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other">
+                            </label>
+                        </div>
+                        <div class="pro-mgmt-actions-new">
+                            <button type="button" class="pro-mgmt-grant-btn-new" id="proGrantBtn">منح اشتراك</button>
+                            <button type="button" class="pro-mgmt-revoke-btn-new" id="proRevokeBtn">إبطال الاشتراك</button>
+                        </div>
+                        <div class="pro-mgmt-note-new">
+                            الإبطال فوري. إن كان للمستخدم اشتراك فعلي من متجر (Google Play / Huawei / زين كاش) فقد يعود تلقائياً عند أول تجديد أو تحقق من المتجر — لأن بيانات المتجر هي المرجع.
+                        </div>
+                        <div class="pro-mgmt-status-new" id="proGrantStatus" style="display: none;"></div>
+                    </div>
+                </div>
+
+                <div class="pro-subs-card-new" id="proSubscribersCard">
+                    <div class="pro-mgmt-header-new">
+                        <div class="pro-subs-header-icon-new">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3>المشتركون</h3>
+                            <p>قائمة مباشرة بكل اشتراكات PRO من السيرفر: نوع الخطة، وسيلة الدفع، وهل هي منحة مجانية منّا أم اشتراك دفعه المستخدم بنفسه.</p>
+                        </div>
+                    </div>
+
+                    <div class="pro-subs-stats-new" id="proSubsStats"></div>
+
+                    <div class="pro-subs-tools-new">
+                        <input type="text" id="proSubsSearchInput" placeholder="بحث بالاسم أو البريد أو معرّف الحساب..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="other">
+                        <select id="proSubsFilterSelect">
+                            <option value="active">الفعّالون فقط</option>
+                            <option value="all">الجميع (مع المنتهين)</option>
+                        </select>
+                    </div>
+
+                    <div class="pro-subs-table-wrap-new">
+                        <table class="pro-subs-table-new">
+                            <thead>
+                                <tr>
+                                    <th>المستخدم</th>
+                                    <th>نوع الخطة</th>
+                                    <th>المصدر / وسيلة الدفع</th>
+                                    <th>الحالة</th>
+                                    <th>ينتهي في</th>
+                                </tr>
+                            </thead>
+                            <tbody id="proSubsTableBody">
+                                <tr><td colspan="5" class="pro-subs-empty-new">جاري التحميل...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </section>
 
