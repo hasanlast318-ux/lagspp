@@ -7023,3 +7023,511 @@ svg {
 [data-theme="dark"] .grid-item-value {
     color: var(--gray-800);
 }
+
+/* ========== لوحة إدارة اشتراك PRO (منح/إبطال) ========== */
+.pro-mgmt-view-new {
+    align-items: flex-start;
+    justify-content: center;
+    padding: 12px;
+    overflow-y: auto;
+}
+
+.pro-mgmt-card-new {
+    background: #ffffff;
+    border: 1px solid var(--gray-200, #e5e7eb);
+    border-radius: 18px;
+    box-shadow: 0 10px 30px rgba(17, 24, 39, 0.06);
+    max-width: 640px;
+    width: 100%;
+    padding: 24px;
+}
+
+.pro-mgmt-header-new {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 20px;
+}
+
+.pro-mgmt-header-icon-new {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    border-radius: 12px;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 900;
+    letter-spacing: 1px;
+    padding: 12px 10px;
+    flex-shrink: 0;
+}
+
+.pro-mgmt-header-new h3 {
+    color: var(--gray-900, #111827);
+    font-size: 17px;
+    font-weight: 800;
+    margin: 0 0 6px;
+}
+
+.pro-mgmt-header-new p {
+    color: var(--gray-500, #6b7280);
+    font-size: 12.5px;
+    line-height: 1.8;
+    margin: 0;
+}
+
+.pro-mgmt-form-new {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.pro-mgmt-field-new {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+}
+
+.pro-mgmt-field-new span {
+    color: var(--gray-600, #4b5563);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.pro-mgmt-field-new input {
+    background: var(--gray-50, #f9fafb);
+    border: 1px solid var(--gray-200, #e5e7eb);
+    border-radius: 10px;
+    color: var(--gray-900, #111827);
+    font-size: 14px;
+    padding: 11px 12px;
+    outline: none;
+    transition: border-color .15s, box-shadow .15s;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.pro-mgmt-field-new input:focus {
+    border-color: var(--primary-400, #818cf8);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, .15);
+}
+
+.pro-mgmt-row-new {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.pro-mgmt-actions-new {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.pro-mgmt-grant-btn-new,
+.pro-mgmt-revoke-btn-new {
+    border: 0;
+    border-radius: 12px;
+    color: #fff;
+    cursor: pointer;
+    flex: 1;
+    font-size: 14px;
+    font-weight: 800;
+    min-width: 160px;
+    padding: 13px;
+    transition: filter .15s, transform .1s;
+}
+
+.pro-mgmt-grant-btn-new {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+}
+
+.pro-mgmt-revoke-btn-new {
+    background: linear-gradient(135deg, #ef4444, #b91c1c);
+}
+
+.pro-mgmt-grant-btn-new:hover:not(:disabled),
+.pro-mgmt-revoke-btn-new:hover:not(:disabled) {
+    filter: brightness(1.07);
+}
+
+.pro-mgmt-grant-btn-new:active:not(:disabled),
+.pro-mgmt-revoke-btn-new:active:not(:disabled) {
+    transform: scale(.98);
+}
+
+.pro-mgmt-grant-btn-new:disabled,
+.pro-mgmt-revoke-btn-new:disabled {
+    cursor: not-allowed;
+    opacity: .55;
+}
+
+.pro-mgmt-note-new {
+    background: rgba(99, 102, 241, .07);
+    border-radius: 10px;
+    color: var(--gray-600, #4b5563);
+    font-size: 11.5px;
+    line-height: 1.8;
+    padding: 10px 12px;
+}
+
+.pro-mgmt-status-new {
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.9;
+    padding: 12px 14px;
+}
+
+.pro-mgmt-status-loading-new {
+    background: rgba(99, 102, 241, .1);
+    color: var(--primary-700, #4338ca);
+}
+
+.pro-mgmt-status-success-new {
+    background: rgba(16, 185, 129, .12);
+    color: #047857;
+}
+
+.pro-mgmt-status-error-new {
+    background: rgba(239, 68, 68, .12);
+    color: #b91c1c;
+}
+
+.pro-mgmt-status-new small {
+    font-weight: 600;
+    opacity: .85;
+}
+
+[data-theme="dark"] .pro-mgmt-card-new {
+    background: #1e293b;
+    border-color: rgba(148, 163, 184, .18);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+}
+
+[data-theme="dark"] .pro-mgmt-header-new h3 {
+    color: #f1f5f9;
+}
+
+[data-theme="dark"] .pro-mgmt-header-new p {
+    color: #94a3b8;
+}
+
+[data-theme="dark"] .pro-mgmt-field-new span {
+    color: #cbd5e1;
+}
+
+[data-theme="dark"] .pro-mgmt-field-new input {
+    background: #0f172a;
+    border-color: rgba(148, 163, 184, .22);
+    color: #f1f5f9;
+}
+
+[data-theme="dark"] .pro-mgmt-note-new {
+    background: rgba(99, 102, 241, .14);
+    color: #cbd5e1;
+}
+
+[data-theme="dark"] .pro-mgmt-status-loading-new {
+    background: rgba(99, 102, 241, .2);
+    color: #c7d2fe;
+}
+
+[data-theme="dark"] .pro-mgmt-status-success-new {
+    background: rgba(16, 185, 129, .18);
+    color: #6ee7b7;
+}
+
+[data-theme="dark"] .pro-mgmt-status-error-new {
+    background: rgba(239, 68, 68, .18);
+    color: #fca5a5;
+}
+
+/* ========== قائمة المشتركين PRO ========== */
+.pro-mgmt-view-new {
+    flex-direction: column;
+    align-items: center;
+}
+
+.pro-subs-card-new {
+    background: #ffffff;
+    border: 1px solid var(--gray-200, #e5e7eb);
+    border-radius: 18px;
+    box-shadow: 0 10px 30px rgba(17, 24, 39, 0.06);
+    max-width: 900px;
+    width: 100%;
+    padding: 24px;
+    margin-top: 14px;
+}
+
+.pro-subs-header-icon-new {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    border-radius: 12px;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    flex-shrink: 0;
+}
+
+.pro-subs-stats-new {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.pro-subs-chip-new {
+    border-radius: 999px;
+    color: var(--gray-700, #374151);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 6px 12px;
+}
+
+.pro-subs-chip-new strong {
+    font-weight: 900;
+}
+
+.pro-subs-chip-new.chip-total {
+    background: rgba(99, 102, 241, .12);
+    color: var(--primary-700, #4338ca);
+}
+
+.pro-subs-tools-new {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+
+.pro-subs-tools-new input {
+    background: var(--gray-50, #f9fafb);
+    border: 1px solid var(--gray-200, #e5e7eb);
+    border-radius: 10px;
+    color: var(--gray-900, #111827);
+    flex: 1;
+    font-size: 13px;
+    min-width: 220px;
+    padding: 10px 12px;
+    outline: none;
+}
+
+.pro-subs-tools-new select {
+    background: var(--gray-50, #f9fafb);
+    border: 1px solid var(--gray-200, #e5e7eb);
+    border-radius: 10px;
+    color: var(--gray-900, #111827);
+    font-size: 13px;
+    font-weight: 700;
+    padding: 10px 12px;
+    outline: none;
+}
+
+.pro-subs-table-wrap-new {
+    border: 1px solid var(--gray-200, #e5e7eb);
+    border-radius: 12px;
+    overflow-x: auto;
+}
+
+.pro-subs-table-new {
+    border-collapse: collapse;
+    font-size: 13px;
+    min-width: 640px;
+    width: 100%;
+}
+
+.pro-subs-table-new thead th {
+    background: var(--gray-50, #f9fafb);
+    color: var(--gray-600, #4b5563);
+    font-size: 11.5px;
+    font-weight: 800;
+    padding: 10px 12px;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.pro-subs-table-new tbody td {
+    border-top: 1px solid var(--gray-100, #f3f4f6);
+    color: var(--gray-800, #1f2937);
+    padding: 10px 12px;
+    text-align: right;
+    vertical-align: middle;
+}
+
+.pro-subs-user-new strong {
+    color: var(--gray-900, #111827);
+    display: block;
+    font-size: 13px;
+}
+
+.pro-subs-user-new small {
+    color: var(--gray-500, #6b7280);
+    direction: ltr;
+    display: block;
+    font-size: 11px;
+}
+
+.pro-subs-src-new {
+    border-radius: 999px;
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 800;
+    padding: 4px 10px;
+    white-space: nowrap;
+}
+
+.pro-subs-src-new.src-play {
+    background: rgba(16, 185, 129, .14);
+    color: #047857;
+}
+
+.pro-subs-src-new.src-huawei {
+    background: rgba(234, 88, 12, .14);
+    color: #c2410c;
+}
+
+.pro-subs-src-new.src-zain {
+    background: rgba(139, 92, 246, .14);
+    color: #6d28d9;
+}
+
+.pro-subs-src-new.src-admin {
+    background: rgba(245, 158, 11, .16);
+    color: #b45309;
+}
+
+.pro-subs-src-new.src-unknown {
+    background: var(--gray-100, #f3f4f6);
+    color: var(--gray-600, #4b5563);
+}
+
+.pro-subs-state-new {
+    border-radius: 999px;
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 800;
+    padding: 4px 10px;
+    white-space: nowrap;
+}
+
+.pro-subs-state-new.on {
+    background: rgba(16, 185, 129, .14);
+    color: #047857;
+}
+
+.pro-subs-state-new.off {
+    background: rgba(107, 114, 128, .14);
+    color: var(--gray-600, #4b5563);
+}
+
+.pro-subs-renew-new {
+    color: var(--primary-600, #4f46e5);
+    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 800;
+    margin-right: 6px;
+}
+
+.pro-subs-empty-new {
+    color: var(--gray-500, #6b7280);
+    font-size: 13px;
+    padding: 18px 12px !important;
+    text-align: center;
+}
+
+[data-theme="dark"] .pro-subs-card-new {
+    background: #1e293b;
+    border-color: rgba(148, 163, 184, .18);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+}
+
+[data-theme="dark"] .pro-subs-chip-new {
+    color: #cbd5e1;
+}
+
+[data-theme="dark"] .pro-subs-chip-new.chip-total {
+    background: rgba(99, 102, 241, .22);
+    color: #c7d2fe;
+}
+
+[data-theme="dark"] .pro-subs-tools-new input,
+[data-theme="dark"] .pro-subs-tools-new select {
+    background: #0f172a;
+    border-color: rgba(148, 163, 184, .22);
+    color: #f1f5f9;
+}
+
+[data-theme="dark"] .pro-subs-table-wrap-new {
+    border-color: rgba(148, 163, 184, .18);
+}
+
+[data-theme="dark"] .pro-subs-table-new thead th {
+    background: #0f172a;
+    color: #94a3b8;
+}
+
+[data-theme="dark"] .pro-subs-table-new tbody td {
+    border-top-color: rgba(148, 163, 184, .12);
+    color: #e2e8f0;
+}
+
+[data-theme="dark"] .pro-subs-user-new strong {
+    color: #f1f5f9;
+}
+
+[data-theme="dark"] .pro-subs-user-new small {
+    color: #94a3b8;
+}
+
+[data-theme="dark"] .pro-subs-src-new.src-play {
+    background: rgba(16, 185, 129, .2);
+    color: #6ee7b7;
+}
+
+[data-theme="dark"] .pro-subs-src-new.src-huawei {
+    background: rgba(234, 88, 12, .2);
+    color: #fdba74;
+}
+
+[data-theme="dark"] .pro-subs-src-new.src-zain {
+    background: rgba(139, 92, 246, .2);
+    color: #c4b5fd;
+}
+
+[data-theme="dark"] .pro-subs-src-new.src-admin {
+    background: rgba(245, 158, 11, .2);
+    color: #fcd34d;
+}
+
+[data-theme="dark"] .pro-subs-src-new.src-unknown {
+    background: rgba(148, 163, 184, .16);
+    color: #94a3b8;
+}
+
+[data-theme="dark"] .pro-subs-state-new.on {
+    background: rgba(16, 185, 129, .2);
+    color: #6ee7b7;
+}
+
+[data-theme="dark"] .pro-subs-state-new.off {
+    background: rgba(148, 163, 184, .16);
+    color: #94a3b8;
+}
+
+[data-theme="dark"] .pro-subs-renew-new {
+    color: #a5b4fc;
+}
+
+[data-theme="dark"] .pro-subs-empty-new {
+    color: #94a3b8;
+}
+
+/* إصلاح اقتصاص أعلى لوحة PRO: المحاذاة الوسطى مع التمرير تقطع أول البطاقات */
+.pro-mgmt-view-new {
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+}
